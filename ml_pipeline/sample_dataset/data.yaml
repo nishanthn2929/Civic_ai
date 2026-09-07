@@ -1,0 +1,7 @@
+path: C:/Users/nisha/OneDrive/Desktop/pixel/ml_pipeline/sample_dataset
+train: images/train
+val: images/val
+names:
+  0: pothole
+  1: road_damage
+  2: road_crack

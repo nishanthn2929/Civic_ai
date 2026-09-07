@@ -1,0 +1,283 @@
+import base64
+import os
+import uuid
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from sqlalchemy.orm import Session
+from backend.app.core.database import get_db
+from backend.app.core.config import settings
+from backend.app.models.models import (
+    User, Report, ReportMedia, Incident, IncidentStatus, IncidentStatusHistory,
+    Ward, Department, AIDetection, AuditLog, Notification, ReportStatus
+)
+from backend.app.schemas.schemas import ReportCreate, ReportOut, ReportPreScreenResponse
+from backend.app.api.deps import get_current_user, get_current_active_user
+from backend.app.services.ai_cv import cv_service
+from backend.app.services.gis_service import gis_service
+from backend.app.services.verification_service import verification_service
+from backend.app.services.duplicate_engine import duplicate_engine
+from backend.app.services.priority_engine import priority_engine
+from backend.app.services.routing_service import routing_service
+
+router = APIRouter(prefix="/reports", tags=["Reports"])
+
+def save_media_file(data_bytes: bytes, extension: str = "jpg") -> str:
+    filename = f"media_{uuid.uuid4().hex[:12]}.{extension}"
+    filepath = os.path.join(settings.MEDIA_DIR, filename)
+    with open(filepath, "wb") as f:
+        f.write(data_bytes)
+    return f"/media/{filename}"
+
+@router.post("/prescreen", response_model=ReportPreScreenResponse)
+async def prescreen_report(
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    file: UploadFile = File(...)
+):
+    """Pre-screen uploaded photo: runs YOLO AI detection, blur check, and Bengaluru ward lookup."""
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # 1. Computer Vision detection
+    cv_res = cv_service.detect_in_image(contents)
+
+    # 2. Bengaluru Ward lookup
+    ward_info = gis_service.find_ward_by_coordinates(latitude, longitude)
+
+    # 3. Department suggestion
+    dept_code = routing_service.CATEGORY_TO_DEPT_CODE.get(cv_res["detected_category"], "BBMP_ROADS")
+
+    return ReportPreScreenResponse(
+        detected_category=cv_res["detected_category"],
+        confidence=cv_res["confidence"],
+        suggested_severity=cv_res["suggested_severity"],
+        blur_score=cv_res["blur_score"],
+        is_clear=cv_res["is_clear"],
+        bboxes=cv_res["detections"],
+        bengaluru_ward=ward_info["ward_name"] if ward_info else "Bengaluru Urban",
+        bengaluru_zone=ward_info["zone_name"] if ward_info else "Central",
+        suggested_department=dept_code
+    )
+
+@router.post("/create", response_model=ReportOut)
+async def create_report(
+    category: str = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    raw_text: Optional[str] = Form(None),
+    address: Optional[str] = Form(None),
+    source: Optional[str] = Form("manual"),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
+    """Submit a citizen report with full verification, duplicate detection, and incident routing."""
+    media_url = None
+    blur_val = 150.0
+    image_phash = None
+    ai_conf = 0.80
+    detections_list = []
+
+    if file:
+        contents = await file.read()
+        media_url = save_media_file(contents)
+        try:
+            cv_res = cv_service.detect_in_image(contents)
+            blur_val = cv_res["blur_score"]
+            image_phash = cv_res["phash"]
+            ai_conf = cv_res["confidence"]
+            detections_list = cv_res["detections"]
+        except Exception as e:
+            print(f"[Warning] Image analysis error: {e}")
+
+    # 1. Quality & Evidence Verification
+    is_verified, quality_score, status_reason = verification_service.verify_report_quality(
+        ai_confidence=ai_conf,
+        blur_score=blur_val,
+        lat=latitude,
+        lon=longitude
+    )
+
+    # 2. Ward GIS lookup
+    ward_info = gis_service.find_ward_by_coordinates(latitude, longitude)
+    ward = None
+    if ward_info:
+        ward = db.query(Ward).filter(Ward.ward_number == ward_info["ward_number"]).first()
+
+    # 3. Create Report record
+    user_id = current_user.id if current_user else None
+    report = Report(
+        user_id=user_id,
+        source=source or "manual",
+        raw_text=raw_text,
+        category=category,
+        ai_confidence=ai_conf,
+        latitude=latitude,
+        longitude=longitude,
+        address=address or (f"{ward_info['ward_name']}, Bengaluru" if ward_info else "Bengaluru"),
+        ward_id=ward.id if ward else None,
+        quality_score=quality_score,
+        status=ReportStatus.VERIFIED.value if is_verified else ReportStatus.SUBMITTED.value
+    )
+    db.add(report)
+    db.flush()
+
+    # 4. Save Report Media & Detections
+    if media_url:
+        media_record = ReportMedia(
+            report_id=report.id,
+            media_url=media_url,
+            image_phash=image_phash,
+            blur_score=blur_val
+        )
+        db.add(media_record)
+
+        for det in detections_list:
+            db.add(AIDetection(
+                report_id=report.id,
+                class_name=det["class_name"],
+                confidence=det["confidence"],
+                bbox_x1=det["bbox"][0] if det.get("bbox") else None,
+                bbox_y1=det["bbox"][1] if det.get("bbox") else None,
+                bbox_x2=det["bbox"][2] if det.get("bbox") else None,
+                bbox_y2=det["bbox"][3] if det.get("bbox") else None
+            ))
+
+    # 5. Multi-Signal Duplicate Detection Engine (Section 12-13)
+    existing_incident, dup_score = duplicate_engine.find_duplicate_incident(
+        db=db,
+        category=category,
+        lat=latitude,
+        lon=longitude,
+        image_phash=image_phash
+    )
+
+    if existing_incident:
+        # Existing civic problem found! Attach report to existing incident
+        report.incident_id = existing_incident.id
+        report.status = ReportStatus.MERGED.value
+        existing_incident.reports_count += 1
+        
+        # Recalculate incident priority based on increased reports count
+        new_priority = priority_engine.calculate_priority_score(
+            severity=existing_incident.severity,
+            reports_count=existing_incident.reports_count,
+            ai_confidence=ai_conf
+        )
+        existing_incident.priority_score = new_priority
+
+        # Log status history update
+        db.add(IncidentStatusHistory(
+            incident_id=existing_incident.id,
+            old_status=existing_incident.status,
+            new_status=existing_incident.status,
+            comment=f"New confirming report #{report.id} attached (Duplicate score: {dup_score:.2f}). Total reports: {existing_incident.reports_count}."
+        ))
+    else:
+        # New civic problem detected! Create fresh Incident
+        dept = routing_service.get_department_for_category(db, category)
+        calc_severity = priority_engine.calculate_severity(category, ai_conf)
+        calc_priority = priority_engine.calculate_priority_score(calc_severity, reports_count=1, ai_confidence=ai_conf)
+        
+        incident_code = f"BLR-{category[:3].upper()}-{uuid.uuid4().hex[:6].upper()}"
+        initial_status = IncidentStatus.VERIFIED.value if is_verified else IncidentStatus.NEEDS_VERIFICATION.value
+
+        new_incident = Incident(
+            incident_code=incident_code,
+            category=category,
+            title=f"{category} near {report.address or 'Bengaluru'}",
+            description=raw_text or f"Automated {category} reported via {source}.",
+            severity=calc_severity,
+            priority_score=calc_priority,
+            status=initial_status,
+            latitude=latitude,
+            longitude=longitude,
+            address=report.address,
+            ward_id=ward.id if ward else None,
+            department_id=dept.id if dept else None,
+            reports_count=1,
+            primary_media_url=media_url
+        )
+        db.add(new_incident)
+        db.flush()
+
+        report.incident_id = new_incident.id
+
+        # Status History entry
+        db.add(IncidentStatusHistory(
+            incident_id=new_incident.id,
+            old_status=None,
+            new_status=initial_status,
+            comment=f"Incident initialized from citizen report #{report.id}. {status_reason}"
+        ))
+
+    db.commit()
+    db.refresh(report)
+
+    # Return serialized report
+    return ReportOut(
+        id=report.id,
+        source=report.source,
+        raw_text=report.raw_text,
+        category=report.category,
+        ai_confidence=report.ai_confidence,
+        latitude=report.latitude,
+        longitude=report.longitude,
+        address=report.address,
+        ward_id=report.ward_id,
+        ward_name=ward.ward_name if ward else "Bengaluru Urban",
+        incident_id=report.incident_id,
+        status=report.status,
+        created_at=report.created_at,
+        media=[ReportMediaOut.model_validate(m) for m in report.media]
+    )
+
+@router.get("/my", response_model=List[ReportOut])
+def get_my_reports(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrieve all reports submitted by logged-in citizen."""
+    reports = db.query(Report).filter(Report.user_id == current_user.id).order_by(Report.created_at.desc()).all()
+    results = []
+    for r in reports:
+        results.append(ReportOut(
+            id=r.id,
+            source=r.source,
+            raw_text=r.raw_text,
+            category=r.category,
+            ai_confidence=r.ai_confidence,
+            latitude=r.latitude,
+            longitude=r.longitude,
+            address=r.address,
+            ward_id=r.ward_id,
+            ward_name=r.ward.ward_name if r.ward else "Bengaluru Urban",
+            incident_id=r.incident_id,
+            status=r.status,
+            created_at=r.created_at,
+            media=[ReportMediaOut.model_validate(m) for m in r.media]
+        ))
+    return results
+
+@router.get("/{report_id}", response_model=ReportOut)
+def get_report_detail(report_id: int, db: Session = Depends(get_db)):
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    return ReportOut(
+        id=report.id,
+        source=report.source,
+        raw_text=report.raw_text,
+        category=report.category,
+        ai_confidence=report.ai_confidence,
+        latitude=report.latitude,
+        longitude=report.longitude,
+        address=report.address,
+        ward_id=report.ward_id,
+        ward_name=report.ward.ward_name if report.ward else "Bengaluru Urban",
+        incident_id=report.incident_id,
+        status=report.status,
+        created_at=report.created_at,
+        media=[ReportMediaOut.model_validate(m) for m in report.media]
+    )
