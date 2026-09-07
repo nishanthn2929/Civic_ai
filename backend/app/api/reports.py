@@ -10,9 +10,10 @@ from backend.app.models.models import (
     User, Report, ReportMedia, Incident, IncidentStatus, IncidentStatusHistory,
     Ward, Department, AIDetection, AuditLog, Notification, ReportStatus
 )
-from backend.app.schemas.schemas import ReportCreate, ReportOut, ReportPreScreenResponse
+from backend.app.schemas.schemas import ReportCreate, ReportOut, ReportPreScreenResponse, ReportMediaOut
 from backend.app.api.deps import get_current_user, get_current_active_user
 from backend.app.services.ai_cv import cv_service
+from backend.app.services.exif_service import exif_service
 from backend.app.services.gis_service import gis_service
 from backend.app.services.verification_service import verification_service
 from backend.app.services.duplicate_engine import duplicate_engine
@@ -30,31 +31,55 @@ def save_media_file(data_bytes: bytes, extension: str = "jpg") -> str:
 
 @router.post("/prescreen", response_model=ReportPreScreenResponse)
 async def prescreen_report(
-    latitude: float = Form(...),
-    longitude: float = Form(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
     file: UploadFile = File(...)
 ):
-    """Pre-screen uploaded photo: runs YOLO AI detection, blur check, and Bengaluru ward lookup."""
+    """Pre-screen uploaded photo: extracts EXIF GPS metadata, runs YOLO AI detection, blur check, and Bengaluru ward lookup."""
     contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # 1. Computer Vision detection
+    # 1. Extract EXIF GPS metadata from photo
+    exif_data = exif_service.extract_image_metadata(contents)
+    has_exif_gps = exif_data["has_gps"]
+    exif_lat = exif_data["latitude"]
+    exif_lon = exif_data["longitude"]
+
+    # Prioritize photo's genuine EXIF GPS tags if present
+    if has_exif_gps:
+        resolved_lat = exif_lat
+        resolved_lon = exif_lon
+        location_source = "EXIF_PHOTO_GEOTAG"
+    else:
+        resolved_lat = latitude if latitude is not None else settings.BLR_CENTER_LAT
+        resolved_lon = longitude if longitude is not None else settings.BLR_CENTER_LNG
+        location_source = "DEVICE_OR_MANUAL"
+
+    # 2. Computer Vision detection & explainable severity
     cv_res = cv_service.detect_in_image(contents)
 
-    # 2. Bengaluru Ward lookup
-    ward_info = gis_service.find_ward_by_coordinates(latitude, longitude)
+    # 3. Bengaluru Ward lookup via Point-in-Polygon
+    ward_info = gis_service.find_ward_by_coordinates(resolved_lat, resolved_lon)
 
-    # 3. Department suggestion
+    # 4. Department suggestion
     dept_code = routing_service.CATEGORY_TO_DEPT_CODE.get(cv_res["detected_category"], "BBMP_ROADS")
 
     return ReportPreScreenResponse(
         detected_category=cv_res["detected_category"],
         confidence=cv_res["confidence"],
         suggested_severity=cv_res["suggested_severity"],
+        severity_reason=cv_res.get("severity_reason"),
+        severity_factors=cv_res.get("severity_factors"),
         blur_score=cv_res["blur_score"],
         is_clear=cv_res["is_clear"],
         bboxes=cv_res["detections"],
+        has_exif_gps=has_exif_gps,
+        exif_latitude=exif_lat,
+        exif_longitude=exif_lon,
+        resolved_latitude=resolved_lat,
+        resolved_longitude=resolved_lon,
+        location_source=location_source,
         bengaluru_ward=ward_info["ward_name"] if ward_info else "Bengaluru Urban",
         bengaluru_zone=ward_info["zone_name"] if ward_info else "Central",
         suggested_department=dept_code
@@ -67,6 +92,8 @@ async def create_report(
     longitude: float = Form(...),
     raw_text: Optional[str] = Form(None),
     address: Optional[str] = Form(None),
+    severity: Optional[str] = Form(None),
+    severity_reason: Optional[str] = Form(None),
     source: Optional[str] = Form("manual"),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -83,11 +110,21 @@ async def create_report(
         contents = await file.read()
         media_url = save_media_file(contents)
         try:
+            # Check photo EXIF GPS
+            exif_data = exif_service.extract_image_metadata(contents)
+            if exif_data["has_gps"]:
+                latitude = exif_data["latitude"]
+                longitude = exif_data["longitude"]
+
             cv_res = cv_service.detect_in_image(contents)
             blur_val = cv_res["blur_score"]
             image_phash = cv_res["phash"]
             ai_conf = cv_res["confidence"]
             detections_list = cv_res["detections"]
+            if not severity and cv_res.get("suggested_severity"):
+                severity = cv_res["suggested_severity"]
+            if not severity_reason and cv_res.get("severity_reason"):
+                severity_reason = cv_res["severity_reason"]
         except Exception as e:
             print(f"[Warning] Image analysis error: {e}")
 
@@ -177,17 +214,27 @@ async def create_report(
     else:
         # New civic problem detected! Create fresh Incident
         dept = routing_service.get_department_for_category(db, category)
-        calc_severity = priority_engine.calculate_severity(category, ai_conf)
+        
+        # Determine incident severity: prioritize verified user/prescreen choice
+        if severity and severity.upper() in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]:
+            calc_severity = severity.upper()
+        else:
+            calc_severity = priority_engine.calculate_severity(category, ai_conf)
+
         calc_priority = priority_engine.calculate_priority_score(calc_severity, reports_count=1, ai_confidence=ai_conf)
         
         incident_code = f"BLR-{category[:3].upper()}-{uuid.uuid4().hex[:6].upper()}"
         initial_status = IncidentStatus.VERIFIED.value if is_verified else IncidentStatus.NEEDS_VERIFICATION.value
 
+        incident_desc = raw_text or f"Automated {category} reported via {source}."
+        if severity_reason:
+            incident_desc += f"\n[Severity Rationale] {severity_reason}"
+
         new_incident = Incident(
             incident_code=incident_code,
             category=category,
             title=f"{category} near {report.address or 'Bengaluru'}",
-            description=raw_text or f"Automated {category} reported via {source}.",
+            description=incident_desc,
             severity=calc_severity,
             priority_score=calc_priority,
             status=initial_status,

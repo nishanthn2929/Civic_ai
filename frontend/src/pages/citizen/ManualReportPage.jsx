@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2, RefreshCw, Send, ShieldAlert } from 'lucide-react';
+import { Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2, RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck } from 'lucide-react';
 import { citizenService } from '../../services/api';
 
 export default function ManualReportPage({ currentUser, onReportSuccess }) {
@@ -7,6 +7,9 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [category, setCategory] = useState('Pothole');
   const [description, setDescription] = useState('');
+  const [severity, setSeverity] = useState('MEDIUM');
+  const [severityReason, setSeverityReason] = useState('');
+  const [exifGpsDetected, setExifGpsDetected] = useState(false);
   const [latitude, setLatitude] = useState(12.9352); // Default Koramangala
   const [longitude, setLongitude] = useState(77.6245);
   const [address, setAddress] = useState('80ft Road, 4th Block, Koramangala');
@@ -26,13 +29,14 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
         (pos) => {
           setLatitude(pos.coords.latitude);
           setLongitude(pos.coords.longitude);
+          setExifGpsDetected(false);
         },
         (err) => console.log('Location access error: ', err.message)
       );
     }
   };
 
-  // Handle image selection & trigger automatic AI pre-screening
+  // Handle image selection & trigger automatic AI pre-screening + EXIF geotag parsing
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -41,22 +45,42 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     setPreviewUrl(URL.createObjectURL(file));
     setError(null);
     setAiSuggestion(null);
+    setExifGpsDetected(false);
 
-    // Trigger AI pre-screening
+    // Trigger AI pre-screening with EXIF parsing
     setIsPreScreening(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('latitude', latitude.toString());
-      formData.append('longitude', longitude.toString());
+      if (latitude) formData.append('latitude', latitude.toString());
+      if (longitude) formData.append('longitude', longitude.toString());
 
       const res = await citizenService.prescreen(formData);
       setAiSuggestion(res);
+
+      // 1. Geotag Location Recognition from Photo EXIF
+      if (res.has_exif_gps && res.resolved_latitude && res.resolved_longitude) {
+        setLatitude(res.resolved_latitude);
+        setLongitude(res.resolved_longitude);
+        setExifGpsDetected(true);
+      } else {
+        setExifGpsDetected(false);
+      }
+
+      // 2. Category & Address
       if (res.detected_category) {
         setCategory(res.detected_category);
       }
       if (res.bengaluru_ward) {
         setAddress(`${res.bengaluru_ward}, Bengaluru`);
+      }
+
+      // 3. Multi-Factor Severity Clarification (LOW / MEDIUM / HIGH)
+      if (res.suggested_severity) {
+        setSeverity(res.suggested_severity);
+      }
+      if (res.severity_reason) {
+        setSeverityReason(res.severity_reason);
       }
     } catch (err) {
       console.warn('AI Pre-screening error:', err);
@@ -77,6 +101,10 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
       formData.append('longitude', longitude.toString());
       formData.append('raw_text', description);
       formData.append('address', address);
+      formData.append('severity', severity);
+      if (severityReason) {
+        formData.append('severity_reason', severityReason);
+      }
       formData.append('source', 'manual');
       if (selectedFile) {
         formData.append('file', selectedFile);
@@ -206,12 +234,49 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 )}
               </div>
 
+              {/* Photo Geotag Recognition Card */}
+              {exifGpsDetected && (
+                <div className="bg-emerald-950/60 border border-emerald-500/50 rounded-xl p-3.5 flex items-start gap-3 shadow-lg animate-in fade-in">
+                  <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0 mt-0.5">
+                    <MapPin className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div className="text-xs space-y-1 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-emerald-300">Photo Geotag Recognized</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">EXIF GPS</span>
+                    </div>
+                    <p className="text-slate-300 text-[11px]">
+                      Camera coordinates detected: <span className="font-mono text-emerald-400 font-semibold">{latitude.toFixed(4)}° N, {longitude.toFixed(4)}° E</span>
+                    </p>
+                    <p className="text-emerald-400/90 text-[11px]">
+                      Auto-mapped to {aiSuggestion?.bengaluru_ward || 'Bengaluru Ward'} ({aiSuggestion?.bengaluru_zone || 'Central Zone'})
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!exifGpsDetected && selectedFile && !isPreScreening && (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-400">
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>No camera GPS in photo. Using device/map coordinates.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGetLocation}
+                    className="px-2 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+                  >
+                    Refresh GPS
+                  </button>
+                </div>
+              )}
+
               {/* AI Pre-Screening Live Card */}
               {isPreScreening && (
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3 animate-pulse">
                   <RefreshCw className="w-5 h-5 text-emerald-400 animate-spin" />
                   <div className="text-xs">
-                    <div className="font-bold text-emerald-400">YOLO AI Analyzing Road Surface...</div>
+                    <div className="font-bold text-emerald-400">YOLO AI Analyzing Road Surface & EXIF...</div>
                     <div className="text-slate-400 text-[11px]">Evaluating road cavities, blur variance, and GIS boundaries</div>
                   </div>
                 </div>
@@ -237,7 +302,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     <div className="bg-slate-900 p-2 rounded-lg">
                       <span className="text-slate-400 text-[10px] block">Suggested Severity</span>
                       <span className={`font-semibold ${
-                        aiSuggestion.suggested_severity === 'HIGH' ? 'text-orange-400' : 'text-yellow-400'
+                        aiSuggestion.suggested_severity === 'HIGH' ? 'text-rose-400' : aiSuggestion.suggested_severity === 'MEDIUM' ? 'text-amber-400' : 'text-emerald-400'
                       }`}>
                         {aiSuggestion.suggested_severity}
                       </span>
@@ -294,7 +359,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">Citizen Description (Optional)</label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Deep pothole near junction. Two wheelers skidding during evening traffic."
@@ -302,10 +367,117 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 />
               </div>
 
+              {/* Severity Clarification (LOW / MEDIUM / HIGH) */}
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Severity Clarification
+                  </label>
+                  {aiSuggestion?.suggested_severity && (
+                    <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> AI Suggested: {aiSuggestion.suggested_severity}
+                    </span>
+                  )}
+                </div>
+
+                {/* 3 Selectable Tiers */}
+                <div className="grid grid-cols-3 gap-2">
+                  {/* LOW */}
+                  <button
+                    type="button"
+                    onClick={() => setSeverity('LOW')}
+                    className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                      severity === 'LOW'
+                        ? 'bg-emerald-950/40 border-emerald-500 shadow-md shadow-emerald-950/50'
+                        : 'bg-slate-950/50 border-slate-800 hover:border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-xs font-bold ${severity === 'LOW' ? 'text-emerald-400' : 'text-slate-300'}`}>LOW</span>
+                      {severity === 'LOW' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">Minor wear, surface cracks, safe transit</p>
+                    {aiSuggestion?.suggested_severity === 'LOW' && (
+                      <span className="absolute -top-1.5 -right-1 text-[8px] bg-emerald-500 text-slate-950 font-bold px-1 rounded">AI</span>
+                    )}
+                  </button>
+
+                  {/* MEDIUM */}
+                  <button
+                    type="button"
+                    onClick={() => setSeverity('MEDIUM')}
+                    className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                      severity === 'MEDIUM'
+                        ? 'bg-amber-950/40 border-amber-500 shadow-md shadow-amber-950/50'
+                        : 'bg-slate-950/50 border-slate-800 hover:border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-xs font-bold ${severity === 'MEDIUM' ? 'text-amber-400' : 'text-slate-300'}`}>MEDIUM</span>
+                      {severity === 'MEDIUM' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">Moderate cavity, rim impact risk</p>
+                    {aiSuggestion?.suggested_severity === 'MEDIUM' && (
+                      <span className="absolute -top-1.5 -right-1 text-[8px] bg-amber-500 text-slate-950 font-bold px-1 rounded">AI</span>
+                    )}
+                  </button>
+
+                  {/* HIGH */}
+                  <button
+                    type="button"
+                    onClick={() => setSeverity('HIGH')}
+                    className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                      severity === 'HIGH'
+                        ? 'bg-rose-950/40 border-rose-500 shadow-md shadow-rose-950/50'
+                        : 'bg-slate-950/50 border-slate-800 hover:border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-xs font-bold ${severity === 'HIGH' ? 'text-rose-400' : 'text-slate-300'}`}>HIGH</span>
+                      {severity === 'HIGH' && <Check className="w-3.5 h-3.5 text-rose-400" />}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">Deep crater, two-wheeler fall risk</p>
+                    {aiSuggestion?.suggested_severity === 'HIGH' && (
+                      <span className="absolute -top-1.5 -right-1 text-[8px] bg-rose-500 text-slate-950 font-bold px-1 rounded">AI</span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Explainable Rationale Box */}
+                {(severityReason || aiSuggestion?.severity_reason) && (
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-xs space-y-2">
+                    <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-[11px]">
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Severity Assessment & Rationale:</span>
+                    </div>
+                    <p className="text-slate-400 text-[11px] leading-relaxed">
+                      {severityReason || aiSuggestion?.severity_reason}
+                    </p>
+                    {aiSuggestion?.severity_factors && (
+                      <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-900 text-[10px]">
+                        <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800">
+                          Cavity Area: <strong className="text-emerald-400">{aiSuggestion.severity_factors.defect_area_pct}%</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800">
+                          Target Action: <strong className="text-cyan-400">{aiSuggestion.severity_factors.recommended_action}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Location Coordinates & Address */}
               <div className="space-y-2 pt-2 border-t border-slate-800">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-400">GPS Location</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-400">GPS Location</span>
+                    {exifGpsDetected ? (
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-semibold border border-emerald-500/30">From Photo EXIF</span>
+                    ) : (
+                      <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded font-semibold">Device / Pin</span>
+                    )}
+                  </div>
                   <span className="font-mono text-emerald-400">{latitude.toFixed(4)}, {longitude.toFixed(4)}</span>
                 </div>
                 <div>

@@ -184,6 +184,108 @@ def test_suite():
         db.close()
     run_test("Citizen-Assisted Government Handoff Dossier Generation", test_govt_adapter_handoff)
 
+    print("\n--- 7. EXIF GPS Recognition & BBMP Ward Mapping Tests ---")
+    def test_exif_gps_extraction():
+        from PIL import Image, ExifTags
+        import io
+        from backend.app.services.exif_service import exif_service
+
+        # Synthesize geotagged JPEG pointing to Koramangala (12.9352, 77.6245)
+        img = Image.new("RGB", (200, 200), color=(80, 80, 80))
+        exif = img.getexif()
+        gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
+        gps[ExifTags.GPS.GPSLatitudeRef] = "N"
+        gps[ExifTags.GPS.GPSLatitude] = (12.0, 56.0, 6.72)
+        gps[ExifTags.GPS.GPSLongitudeRef] = "E"
+        gps[ExifTags.GPS.GPSLongitude] = (77.0, 37.0, 28.2)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", exif=exif)
+        jpeg_bytes = buf.getvalue()
+
+        # 1. Direct Service Test
+        meta = exif_service.extract_image_metadata(jpeg_bytes)
+        assert meta["has_gps"] is True, "Expected has_gps to be True"
+        assert abs(meta["latitude"] - 12.9352) < 0.001, f"Latitude {meta['latitude']} mismatch"
+        assert abs(meta["longitude"] - 77.6245) < 0.001, f"Longitude {meta['longitude']} mismatch"
+
+        # 2. Pre-screen API Geotag Recognition Test
+        files = {"file": ("geotagged_road.jpg", jpeg_bytes, "image/jpeg")}
+        res = client.post("/api/reports/prescreen", files=files)
+        assert res.status_code == 200, f"Prescreen failed: {res.text}"
+        data = res.json()
+        assert data["has_exif_gps"] is True, "Pre-screen did not flag has_exif_gps"
+        assert abs(data["resolved_latitude"] - 12.9352) < 0.001
+        assert abs(data["resolved_longitude"] - 77.6245) < 0.001
+        assert data["bengaluru_ward"] == "Koramangala", f"Expected Koramangala, got {data['bengaluru_ward']}"
+        assert data["location_source"] == "EXIF_PHOTO_GEOTAG"
+    run_test("Photo EXIF GPS Extraction & BBMP Ward Point-in-Polygon Resolution", test_exif_gps_extraction)
+
+    def test_non_geotagged_fallback():
+        from PIL import Image
+        import io
+        img = Image.new("RGB", (100, 100), color=(50, 50, 50))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        files = {"file": ("plain_road.jpg", buf.getvalue(), "image/jpeg")}
+        data = {"latitude": 12.9120, "longitude": 77.6450} # HSR Layout
+        res = client.post("/api/reports/prescreen", data=data, files=files)
+        assert res.status_code == 200
+        out = res.json()
+        assert out["has_exif_gps"] is False
+        assert out["bengaluru_ward"] == "HSR Layout"
+        assert out["location_source"] == "DEVICE_OR_MANUAL"
+    run_test("Non-Geotagged Photo Graceful Coordinate & Ward Fallback", test_non_geotagged_fallback)
+
+    print("\n--- 8. Multi-Factor Severity Clarification Tests (LOW / MEDIUM / HIGH) ---")
+    def test_severity_classification_and_rationale():
+        from PIL import Image
+        import io
+        img = Image.new("RGB", (300, 300), color=(40, 40, 40))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        files = {"file": ("road_check.jpg", buf.getvalue(), "image/jpeg")}
+        res = client.post("/api/reports/prescreen", files=files)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["suggested_severity"] in ["LOW", "MEDIUM", "HIGH"]
+        assert data["severity_reason"] is not None and len(data["severity_reason"]) > 15
+        assert data["severity_factors"] is not None
+        assert "defect_area_pct" in data["severity_factors"]
+        assert "recommended_action" in data["severity_factors"]
+    run_test("Defect Area & Plain-Language Severity Rationale Generation", test_severity_classification_and_rationale)
+
+    def test_custom_severity_persisted_in_incident():
+        from PIL import Image
+        import io
+        img = Image.new("RGB", (100, 100), color=(60, 60, 60))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        files = {"file": ("crater.jpg", buf.getvalue(), "image/jpeg")}
+        unique_lat = 12.9500 + (float(uuid.uuid4().int % 10000) / 100000.0)
+        unique_lon = 77.6000 + (float(uuid.uuid4().int % 10000) / 100000.0)
+        data = {
+            "category": "Pothole",
+            "latitude": unique_lat,
+            "longitude": unique_lon,
+            "raw_text": "Deep hazardous pothole reported by citizen.",
+            "severity": "HIGH",
+            "severity_reason": "High severity crater covering 14% road area with severe rim damage risk."
+        }
+        headers = {"Authorization": f"Bearer {auth_token}"}
+        create_res = client.post("/api/reports/create", data=data, files=files, headers=headers)
+        assert create_res.status_code == 200, f"Report creation failed: {create_res.text}"
+        rep = create_res.json()
+        
+        # Verify incident severity
+        db = SessionLocal()
+        inc = db.query(Incident).filter(Incident.id == rep["incident_id"]).first()
+        assert inc is not None
+        assert inc.severity == "HIGH", f"Expected HIGH severity, got {inc.severity}"
+        assert inc.priority_score >= 50.0, f"Expected high priority score, got {inc.priority_score}"
+        db.close()
+    run_test("Citizen-Verified Severity Persisted in Canonical Incident", test_custom_severity_persisted_in_incident)
+
     print("\n========================================================================")
     print(f"RESULTS: {passed} PASSED, {failed} FAILED")
     print("========================================================================\n")

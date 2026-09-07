@@ -64,9 +64,17 @@ class ReportPreScreenResponse(BaseModel):
     detected_category: str
     confidence: float
     suggested_severity: str
+    severity_reason: Optional[str] = None
+    severity_factors: Optional[Dict[str, Any]] = None
     blur_score: float
     is_clear: bool
     bboxes: List[Dict[str, Any]] = []
+    has_exif_gps: bool = False
+    exif_latitude: Optional[float] = None
+    exif_longitude: Optional[float] = None
+    resolved_latitude: float
+    resolved_longitude: float
+    location_source: str = "DEFAULT"
     bengaluru_ward: Optional[str] = None
     bengaluru_zone: Optional[str] = None
     suggested_department: Optional[str] = None
@@ -79,6 +87,8 @@ class ReportCreate(BaseModel):
     address: Optional[str] = None
     source: Optional[str] = "manual"
     ai_confidence: Optional[float] = 0.0
+    severity: Optional[str] = None
+    severity_reason: Optional[str] = None
     media_base64: Optional[str] = None  # Optional base64 or multipart upload
 
 class ReportMediaOut(BaseModel):

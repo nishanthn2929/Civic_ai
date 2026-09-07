@@ -183,18 +183,73 @@ class ComputerVisionService:
             detected_category = "Road Damage"
             confidence = 0.55
 
-        # Suggested severity based on cavity dimensions & confidence
-        if confidence >= 0.85:
+        # Compute physical defect dimensions and road area ratios
+        total_defect_area_ratio = 0.0
+        max_box_area_ratio = 0.0
+        for det in detections:
+            bbox = det.get("bbox", [0, 0, 0, 0])
+            bw = max(0.0, float(bbox[2]) - float(bbox[0]))
+            bh = max(0.0, float(bbox[3]) - float(bbox[1]))
+            ratio = (bw * bh) / float(w * h)
+            total_defect_area_ratio += ratio
+            if ratio > max_box_area_ratio:
+                max_box_area_ratio = ratio
+
+        area_pct = round(max_box_area_ratio * 100, 1)
+        total_pct = round(total_defect_area_ratio * 100, 1)
+        num_defects = len(detections)
+
+        # Multi-factor Severity Classification: LOW, MEDIUM, HIGH
+        if detected_category in ["Open Manhole"]:
             suggested_severity = "HIGH"
-        elif confidence >= 0.65:
+            severity_reason = (
+                f"HIGH: Critical open chamber/manhole detected. Immediate severe fall hazard for pedestrians "
+                f"and acute rollover/wheel trap hazard for two-wheelers."
+            )
+        elif max_box_area_ratio >= 0.08 or total_defect_area_ratio >= 0.12 or (confidence >= 0.75 and max_box_area_ratio >= 0.05):
+            suggested_severity = "HIGH"
+            severity_reason = (
+                f"HIGH: Prominent road cavity occupying {area_pct}% of the image frame "
+                f"({total_pct}% total defect area across {num_defects} detection{'s' if num_defects != 1 else ''}). "
+                f"Poses immediate suspension/rim damage and two-wheeler skidding risk."
+            )
+        elif max_box_area_ratio >= 0.025 or total_defect_area_ratio >= 0.04 or confidence >= 0.60:
             suggested_severity = "MEDIUM"
+            severity_reason = (
+                f"MEDIUM: Moderate road defect covering {area_pct}% of visible road surface. "
+                f"Requires vehicular deceleration; risks wheel misalignment and tire sidewall impact at normal speed."
+            )
         else:
             suggested_severity = "LOW"
+            severity_reason = (
+                f"LOW: Minor surface defect/crack covering {area_pct}% of road view. "
+                f"Asphalt integrity is beginning to weather; traffic flow remains safe but preventive crack sealing is recommended."
+            )
+
+        severity_factors = {
+            "severity": suggested_severity,
+            "defect_area_pct": area_pct,
+            "total_area_pct": total_pct,
+            "defect_count": num_defects,
+            "risk_level": "CRITICAL" if suggested_severity == "HIGH" else "MODERATE" if suggested_severity == "MEDIUM" else "MINOR",
+            "hazard_summary": (
+                "Wheel trap & two-wheeler fall risk" if suggested_severity == "HIGH"
+                else "Vehicle deflection & rim impact risk" if suggested_severity == "MEDIUM"
+                else "Surface weathering & early wear"
+            ),
+            "recommended_action": (
+                "Emergency cold-mix pothole patching within 24 hours" if suggested_severity == "HIGH"
+                else "Scheduled asphalt leveling repair within 72 hours" if suggested_severity == "MEDIUM"
+                else "Routine municipal crack sealing and inspection"
+            )
+        }
 
         return {
             "detected_category": detected_category,
             "confidence": confidence,
             "suggested_severity": suggested_severity,
+            "severity_reason": severity_reason,
+            "severity_factors": severity_factors,
             "blur_score": round(blur_val, 2),
             "is_clear": is_clear,
             "phash": phash,
