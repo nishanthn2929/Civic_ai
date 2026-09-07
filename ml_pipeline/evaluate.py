@@ -2,11 +2,19 @@ import argparse
 import time
 import sys
 from pathlib import Path
+import numpy as np
+
+# NumPy 2.0 compatibility patch for ultralytics metrics integration
+if not hasattr(np, "trapz"):
+    np.trapz = getattr(np, "trapezoid", None)
+    if np.trapz is None:
+        import scipy.integrate
+        np.trapz = scipy.integrate.trapezoid
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Road Defect & Pothole Detection Model")
-    parser.add_argument("--weights", type=str, default="yolov8n.pt", help="Trained model weights")
-    parser.add_argument("--data", type=str, default="ml_pipeline/sample_dataset/data.yaml", help="Path to data.yaml")
+    parser.add_argument("--weights", type=str, default="ml_pipeline/weights/pothole_best.pt", help="Trained model weights")
+    parser.add_argument("--data", type=str, default="ml_pipeline/coco_dataset/data.yaml", help="Path to data.yaml")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--iou", type=float, default=0.50, help="NMS IoU threshold")
     return parser.parse_args()

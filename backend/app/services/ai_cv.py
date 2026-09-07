@@ -4,28 +4,45 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 import cv2
 import numpy as np
+
+# Ensure NumPy 2.0+ compatibility with Ultralytics trapz calls
+if not hasattr(np, "trapz"):
+    np.trapz = getattr(np, "trapezoid", None)
+
 from PIL import Image
 from backend.app.core.config import settings
 
 class ComputerVisionService:
     def __init__(self):
         self.model = None
+        self.model_name = "None"
         self._init_model()
 
     def _init_model(self):
-        """Initialize YOLO model using ultralytics if available."""
+        """Initialize YOLO model using ultralytics if available, prioritizing trained pothole weights."""
         try:
             from ultralytics import YOLO
-            # Look for local trained weights or fallback to YOLOv8n
-            weights_path = Path(settings.DATA_DIR) / "yolov8n.pt"
-            if weights_path.exists():
-                self.model = YOLO(str(weights_path))
+            data_pothole = Path(settings.DATA_DIR) / "yolov8_pothole_best.pt"
+            pipeline_pothole = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "pothole_best.pt"
+            generic_yolo = Path(settings.DATA_DIR) / "yolov8n.pt"
+
+            if data_pothole.exists():
+                self.model = YOLO(str(data_pothole))
+                self.model_name = f"Custom-Trained Pothole YOLOv8 ({data_pothole.name})"
+            elif pipeline_pothole.exists():
+                self.model = YOLO(str(pipeline_pothole))
+                self.model_name = f"Custom-Trained Pothole YOLOv8 ({pipeline_pothole.name})"
+            elif generic_yolo.exists():
+                self.model = YOLO(str(generic_yolo))
+                self.model_name = f"YOLOv8n ({generic_yolo.name})"
             else:
-                # Initialize lightweight YOLOv8n
                 self.model = YOLO("yolov8n.pt")
+                self.model_name = "YOLOv8n (default)"
+            print(f"[CV Service] Loaded road defect detection model: {self.model_name}")
         except Exception as e:
             print(f"[CV Service Warning] Ultralytics initialization notice: {e}. Fallback detection pipeline active.")
             self.model = None
+            self.model_name = "Contour-Texture Fallback"
 
     @staticmethod
     def compute_blur_score(image_np: np.ndarray) -> float:
