@@ -1,6 +1,91 @@
-import React, { useState, useRef } from 'react';
-import { Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2, RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2, RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck, Navigation } from 'lucide-react';
 import { citizenService } from '../../services/api';
+
+// Pure JavaScript client-side EXIF GPS extractor (parses JPEG APP1 marker within 2ms)
+function extractClientExifGps(file) {
+  return new Promise((resolve) => {
+    if (!file || !file.type.includes('jpeg') && !file.type.includes('jpg')) {
+      return resolve(null);
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const view = new DataView(e.target.result);
+        if (view.getUint16(0, false) !== 0xFFD8) return resolve(null);
+        let offset = 2;
+        const length = view.byteLength;
+        while (offset < length - 4) {
+          const marker = view.getUint16(offset, false);
+          offset += 2;
+          if (marker === 0xFFE1) {
+            const exifLength = view.getUint16(offset, false);
+            offset += 2;
+            if (view.getUint32(offset, false) === 0x45786966 && view.getUint16(offset + 4, false) === 0x0000) {
+              const tiffOffset = offset + 6;
+              const littleEndian = view.getUint16(tiffOffset, false) === 0x4949;
+              const ifdOffset = view.getUint32(tiffOffset + 4, littleEndian);
+              const numEntries = view.getUint16(tiffOffset + ifdOffset, littleEndian);
+              let gpsOffset = 0;
+              for (let i = 0; i < numEntries; i++) {
+                const entryOffset = tiffOffset + ifdOffset + 2 + i * 12;
+                const tag = view.getUint16(entryOffset, littleEndian);
+                if (tag === 0x8825) {
+                  gpsOffset = view.getUint32(entryOffset + 8, littleEndian);
+                  break;
+                }
+              }
+              if (gpsOffset) {
+                const numGpsEntries = view.getUint16(tiffOffset + gpsOffset, littleEndian);
+                let latRef = 'N', lonRef = 'E', latDMS = null, lonDMS = null;
+                for (let i = 0; i < numGpsEntries; i++) {
+                  const entryOffset = tiffOffset + gpsOffset + 2 + i * 12;
+                  const tag = view.getUint16(entryOffset, littleEndian);
+                  const valOffset = view.getUint32(entryOffset + 8, littleEndian);
+                  if (tag === 1) {
+                    latRef = String.fromCharCode(view.getUint8(entryOffset + 8));
+                  } else if (tag === 2) {
+                    const o = tiffOffset + valOffset;
+                    const d = view.getUint32(o, littleEndian) / Math.max(1, view.getUint32(o + 4, littleEndian));
+                    const m = view.getUint32(o + 8, littleEndian) / Math.max(1, view.getUint32(o + 12, littleEndian));
+                    const s = view.getUint32(o + 16, littleEndian) / Math.max(1, view.getUint32(o + 20, littleEndian));
+                    latDMS = d + (m / 60.0) + (s / 3600.0);
+                  } else if (tag === 3) {
+                    lonRef = String.fromCharCode(view.getUint8(entryOffset + 8));
+                  } else if (tag === 4) {
+                    const o = tiffOffset + valOffset;
+                    const d = view.getUint32(o, littleEndian) / Math.max(1, view.getUint32(o + 4, littleEndian));
+                    const m = view.getUint32(o + 8, littleEndian) / Math.max(1, view.getUint32(o + 12, littleEndian));
+                    const s = view.getUint32(o + 16, littleEndian) / Math.max(1, view.getUint32(o + 20, littleEndian));
+                    lonDMS = d + (m / 60.0) + (s / 3600.0);
+                  }
+                }
+                if (latDMS !== null && lonDMS !== null) {
+                  if (latRef.toUpperCase() === 'S') latDMS = -latDMS;
+                  if (lonRef.toUpperCase() === 'W') lonDMS = -lonDMS;
+                  return resolve({
+                    latitude: Number(latDMS.toFixed(6)),
+                    longitude: Number(lonDMS.toFixed(6))
+                  });
+                }
+              }
+            }
+            break;
+          } else if ((marker & 0xFF00) !== 0xFF00) {
+            break;
+          } else {
+            offset += view.getUint16(offset, false);
+          }
+        }
+      } catch (err) {
+        console.warn('Client-side EXIF parse notice:', err);
+      }
+      resolve(null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsArrayBuffer(file.slice(0, 131072));
+  });
+}
 
 export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -10,9 +95,13 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [severity, setSeverity] = useState('MEDIUM');
   const [severityReason, setSeverityReason] = useState('');
   const [exifGpsDetected, setExifGpsDetected] = useState(false);
-  const [latitude, setLatitude] = useState(12.9352); // Default Koramangala
+  const [locationSource, setLocationSource] = useState('DEVICE_GPS'); // 'DEVICE_GPS' | 'PHOTO_EXIF' | 'MANUAL'
+  const [isLocating, setIsLocating] = useState(false);
+  
+  // Coordinates start at null/default and auto-detect from browser GPS
+  const [latitude, setLatitude] = useState(12.9352);
   const [longitude, setLongitude] = useState(77.6245);
-  const [address, setAddress] = useState('80ft Road, 4th Block, Koramangala');
+  const [address, setAddress] = useState('Detecting current location...');
   
   const [isPreScreening, setIsPreScreening] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
@@ -22,17 +111,47 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
 
   const fileInputRef = useRef(null);
 
-  // Auto-fetch device GPS coordinates
+  // Auto-fetch real device GPS coordinates on page load
+  useEffect(() => {
+    handleGetLocation();
+  }, []);
+
+  // Fetch live browser GPS and reverse-geocode true address/ward
   const handleGetLocation = () => {
+    setIsLocating(true);
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLatitude(pos.coords.latitude);
-          setLongitude(pos.coords.longitude);
+        async (pos) => {
+          const lat = Number(pos.coords.latitude.toFixed(6));
+          const lng = Number(pos.coords.longitude.toFixed(6));
+          setLatitude(lat);
+          setLongitude(lng);
           setExifGpsDetected(false);
+          setLocationSource('DEVICE_GPS');
+          setIsLocating(false);
+
+          try {
+            const geo = await citizenService.reverseGeocode(lat, lng);
+            if (geo.formatted_address) {
+              setAddress(geo.formatted_address);
+            } else if (geo.ward_name) {
+              setAddress(`${geo.ward_name}, Bengaluru`);
+            }
+          } catch (e) {
+            setAddress(`Live GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+          }
         },
-        (err) => console.log('Location access error: ', err.message)
+        (err) => {
+          console.log('Location access notice: ', err.message);
+          setIsLocating(false);
+          if (address === 'Detecting current location...') {
+            setAddress('Bengaluru Urban (Tap "Detect My Live Location" or upload photo)');
+          }
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
       );
+    } else {
+      setIsLocating(false);
     }
   };
 
@@ -45,37 +164,52 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     setPreviewUrl(URL.createObjectURL(file));
     setError(null);
     setAiSuggestion(null);
-    setExifGpsDetected(false);
 
-    // Trigger AI pre-screening with EXIF parsing
+    // 1. Instant client-side EXIF GPS check
+    const clientGps = await extractClientExifGps(file);
+    if (clientGps) {
+      setLatitude(clientGps.latitude);
+      setLongitude(clientGps.longitude);
+      setExifGpsDetected(true);
+      setLocationSource('PHOTO_EXIF');
+      citizenService.reverseGeocode(clientGps.latitude, clientGps.longitude).then((geo) => {
+        if (geo.formatted_address) setAddress(geo.formatted_address);
+      }).catch(() => {});
+    }
+
+    // 2. Trigger backend AI pre-screening with EXIF parsing & defect analysis
     setIsPreScreening(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
-      if (latitude) formData.append('latitude', latitude.toString());
-      if (longitude) formData.append('longitude', longitude.toString());
+      const targetLat = clientGps ? clientGps.latitude : latitude;
+      const targetLon = clientGps ? clientGps.longitude : longitude;
+      if (targetLat) formData.append('latitude', targetLat.toString());
+      if (targetLon) formData.append('longitude', targetLon.toString());
 
       const res = await citizenService.prescreen(formData);
       setAiSuggestion(res);
 
-      // 1. Geotag Location Recognition from Photo EXIF
+      // Geotag Location Recognition from Photo EXIF
       if (res.has_exif_gps && res.resolved_latitude && res.resolved_longitude) {
         setLatitude(res.resolved_latitude);
         setLongitude(res.resolved_longitude);
         setExifGpsDetected(true);
-      } else {
+        setLocationSource('PHOTO_EXIF');
+        if (res.formatted_address) {
+          setAddress(res.formatted_address);
+        } else if (res.bengaluru_ward) {
+          setAddress(`${res.bengaluru_ward}, Bengaluru`);
+        }
+      } else if (!clientGps) {
         setExifGpsDetected(false);
+        // Retain user's actual device location, do not force Koramangala
       }
 
-      // 2. Category & Address
+      // Category & Severity
       if (res.detected_category) {
         setCategory(res.detected_category);
       }
-      if (res.bengaluru_ward) {
-        setAddress(`${res.bengaluru_ward}, Bengaluru`);
-      }
-
-      // 3. Multi-Factor Severity Clarification (LOW / MEDIUM / HIGH)
       if (res.suggested_severity) {
         setSeverity(res.suggested_severity);
       }
@@ -139,10 +273,20 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
           <button
             type="button"
             onClick={handleGetLocation}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 transition-colors"
+            disabled={isLocating}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-400 border border-emerald-500/30 transition-all disabled:opacity-50 shadow-sm"
           >
-            <MapPin className="w-4 h-4 text-emerald-400" />
-            <span>Update GPS</span>
+            {isLocating ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Acquiring Live GPS...</span>
+              </>
+            ) : (
+              <>
+                <Navigation className="w-4 h-4 animate-pulse" />
+                <span>Detect My Live GPS</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -229,28 +373,41 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     <div className="text-xs font-semibold text-slate-200">
                       Take Photo or Browse Gallery
                     </div>
-                    <p className="text-[10px] text-slate-500">Supports JPG, PNG with auto blur detection</p>
+                    <p className="text-[10px] text-slate-500">Supports JPG, PNG with auto blur & EXIF GPS detection</p>
                   </div>
                 )}
               </div>
 
               {/* Photo Geotag Recognition Card */}
               {exifGpsDetected && (
-                <div className="bg-emerald-950/60 border border-emerald-500/50 rounded-xl p-3.5 flex items-start gap-3 shadow-lg animate-in fade-in">
-                  <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0 mt-0.5">
+                <div className={`border rounded-xl p-3.5 flex items-start gap-3 shadow-lg animate-in fade-in ${
+                  aiSuggestion && !aiSuggestion.is_within_bengaluru
+                    ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
+                    : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                }`}>
+                  <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
+                    aiSuggestion && !aiSuggestion.is_within_bengaluru ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'
+                  }`}>
                     <MapPin className="w-5 h-5 animate-bounce" />
                   </div>
                   <div className="text-xs space-y-1 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-emerald-300">Photo Geotag Recognized</span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">EXIF GPS</span>
+                      <span className="font-bold">
+                        {aiSuggestion && !aiSuggestion.is_within_bengaluru ? 'Photo Geotag (Non-Bengaluru)' : 'Photo Geotag Recognized'}
+                      </span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 border border-current">EXIF GPS</span>
                     </div>
                     <p className="text-slate-300 text-[11px]">
-                      Camera coordinates detected: <span className="font-mono text-emerald-400 font-semibold">{latitude.toFixed(4)}° N, {longitude.toFixed(4)}° E</span>
+                      Camera coordinates detected: <span className="font-mono font-semibold text-white">{latitude.toFixed(4)}° N, {longitude.toFixed(4)}° E</span>
                     </p>
-                    <p className="text-emerald-400/90 text-[11px]">
-                      Auto-mapped to {aiSuggestion?.bengaluru_ward || 'Bengaluru Ward'} ({aiSuggestion?.bengaluru_zone || 'Central Zone'})
+                    <p className="text-[11px] font-medium text-slate-200">
+                      Location: {address}
                     </p>
+                    {aiSuggestion && !aiSuggestion.is_within_bengaluru && (
+                      <p className="text-[10px] text-amber-400/90 pt-1">
+                        ⚠️ Note: This image was captured outside Bengaluru BBMP municipal boundaries ({aiSuggestion.bengaluru_ward}).
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -259,12 +416,12 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-400">
                   <div className="flex items-center gap-2 text-[11px]">
                     <Info className="w-4 h-4 text-cyan-400 shrink-0" />
-                    <span>No camera GPS in photo. Using device/map coordinates.</span>
+                    <span>No camera GPS tag in photo. Using your live device location ({latitude.toFixed(4)}, {longitude.toFixed(4)}).</span>
                   </div>
                   <button
                     type="button"
                     onClick={handleGetLocation}
-                    className="px-2 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+                    className="px-2 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 shrink-0"
                   >
                     Refresh GPS
                   </button>
@@ -480,14 +637,23 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                   </div>
                   <span className="font-mono text-emerald-400">{latitude.toFixed(4)}, {longitude.toFixed(4)}</span>
                 </div>
-                <div>
+                <div className="relative">
                   <input
                     type="text"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Road, Area, Bengaluru"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    placeholder="Locality, Ward, Bengaluru"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-24 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
+                  <button
+                    type="button"
+                    onClick={handleGetLocation}
+                    disabled={isLocating}
+                    className="absolute right-1 top-1 bottom-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-emerald-400 border border-slate-700 flex items-center gap-1 transition-colors"
+                  >
+                    {isLocating ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Navigation className="w-3 h-3" />}
+                    <span>Get GPS</span>
+                  </button>
                 </div>
               </div>
 

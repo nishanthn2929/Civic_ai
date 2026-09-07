@@ -2,7 +2,7 @@ import base64
 import os
 import uuid
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.core.config import settings
@@ -28,6 +28,24 @@ def save_media_file(data_bytes: bytes, extension: str = "jpg") -> str:
     with open(filepath, "wb") as f:
         f.write(data_bytes)
     return f"/media/{filename}"
+
+@router.get("/reverse-geocode")
+async def reverse_geocode(
+    latitude: float = Query(...),
+    longitude: float = Query(...)
+):
+    """Resolve coordinates to exact Bengaluru BBMP ward/zone or outside regional hub."""
+    loc = gis_service.resolve_location(latitude, longitude)
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "ward_name": loc["ward_name"],
+        "zone_name": loc["zone_name"],
+        "ward_number": loc.get("ward_number"),
+        "region_name": loc.get("region_name"),
+        "is_within_bengaluru": loc.get("is_within_bengaluru", True),
+        "formatted_address": loc.get("formatted_address")
+    }
 
 @router.post("/prescreen", response_model=ReportPreScreenResponse)
 async def prescreen_report(
@@ -60,7 +78,12 @@ async def prescreen_report(
     cv_res = cv_service.detect_in_image(contents)
 
     # 3. Bengaluru Ward lookup via Point-in-Polygon
-    ward_info = gis_service.find_ward_by_coordinates(resolved_lat, resolved_lon)
+    ward_info = gis_service.find_ward_by_coordinates(resolved_lat, resolved_lon) or {
+        "ward_name": "Bengaluru Urban",
+        "zone_name": "Central",
+        "formatted_address": "Bengaluru Urban",
+        "is_within_bengaluru": True
+    }
 
     # 4. Department suggestion
     dept_code = routing_service.CATEGORY_TO_DEPT_CODE.get(cv_res["detected_category"], "BBMP_ROADS")
@@ -80,8 +103,10 @@ async def prescreen_report(
         resolved_latitude=resolved_lat,
         resolved_longitude=resolved_lon,
         location_source=location_source,
-        bengaluru_ward=ward_info["ward_name"] if ward_info else "Bengaluru Urban",
-        bengaluru_zone=ward_info["zone_name"] if ward_info else "Central",
+        bengaluru_ward=ward_info["ward_name"],
+        bengaluru_zone=ward_info["zone_name"],
+        formatted_address=ward_info.get("formatted_address"),
+        is_within_bengaluru=ward_info.get("is_within_bengaluru", True),
         suggested_department=dept_code
     )
 

@@ -77,6 +77,8 @@ class ReportPreScreenResponse(BaseModel):
     location_source: str = "DEFAULT"
     bengaluru_ward: Optional[str] = None
     bengaluru_zone: Optional[str] = None
+    formatted_address: Optional[str] = None
+    is_within_bengaluru: bool = True
     suggested_department: Optional[str] = None
 
 class ReportCreate(BaseModel):

@@ -50,6 +50,12 @@ export const citizenService = {
     const res = await api.post('/reports/prescreen', formData);
     return res.data;
   },
+  reverseGeocode: async (lat, lng) => {
+    const res = await api.get('/reports/reverse-geocode', {
+      params: { latitude: lat, longitude: lng }
+    });
+    return res.data;
+  },
   createReport: async (formData) => {
     const res = await api.post('/reports/create', formData);
     return res.data;
