@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2, RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck, Navigation, Search, Crosshair, Compass } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import {
+  Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2,
+  RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck,
+  Navigation, Search, Crosshair, Compass, ChevronDown, ChevronUp, Lock
+} from 'lucide-react';
+import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { citizenService } from '../../services/api';
 
@@ -132,23 +136,35 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState('MEDIUM');
   const [severityReason, setSeverityReason] = useState('');
+
+  // GPS Device & Location Validation States (Requirements 1, 2, 3, 5, 12)
+  const [deviceGps, setDeviceGps] = useState(null); // { latitude, longitude, accuracy, timestamp }
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [gpsTimestamp, setGpsTimestamp] = useState(null);
+  const [gpsError, setGpsError] = useState(null);
+  const [locationSource, setLocationSource] = useState('GPS'); // 'GPS' | 'MANUAL'
+  const [isLocationConfirmed, setIsLocationConfirmed] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Photo Geotag state (never silently overwrites device GPS)
+  const [photoExifGps, setPhotoExifGps] = useState(null);
   const [exifGpsDetected, setExifGpsDetected] = useState(false);
-  const [locationSource, setLocationSource] = useState('DEVICE_GPS'); // 'DEVICE_GPS' | 'PHOTO_EXIF' | 'MANUAL'
-  const [isLocating, setIsLocating] = useState(false);
-  
-  // Coordinates start at null/default and auto-detect from browser GPS
-  const [latitude, setLatitude] = useState(12.9352);
-  const [longitude, setLongitude] = useState(77.6245);
-  const [address, setAddress] = useState('Detecting current location...');
-  const [mapCenter, setMapCenter] = useState([12.9352, 77.6245]);
-  const [mapZoom, setMapZoom] = useState(15);
+
+  // Coordinates for Map and Ward Resolution (Starts at live GPS or central Bengaluru fallback)
+  const [latitude, setLatitude] = useState(12.9715987);
+  const [longitude, setLongitude] = useState(77.5945627);
+  const [address, setAddress] = useState('Acquiring live device GPS...');
+  const [mapCenter, setMapCenter] = useState([12.9715987, 77.5945627]);
+  const [mapZoom, setMapZoom] = useState(16);
+  const [locationDetails, setLocationDetails] = useState(null);
+  const [detectedOutsideGeo, setDetectedOutsideGeo] = useState(null);
+
+  // Search & Loading States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [gpsAccuracy, setGpsAccuracy] = useState(null);
-  const [locationDetails, setLocationDetails] = useState(null);
-  const [detectedOutsideGeo, setDetectedOutsideGeo] = useState(null);
-  
+  const [isLocating, setIsLocating] = useState(false);
+
   const [isPreScreening, setIsPreScreening] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -157,15 +173,16 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
 
   const fileInputRef = useRef(null);
 
-  // Centralized coordinate update & reverse-geocoding
-  const updateExactCoordinates = useCallback(async (newLat, newLon, source = 'PIN_DRAGGED', newZoom = null) => {
-    const lat = Number(Number(newLat).toFixed(6));
-    const lng = Number(Number(newLon).toFixed(6));
+  // Centralized coordinate update & point-in-polygon reverse-geocoding
+  const updateExactCoordinates = useCallback(async (newLat, newLon, source = 'MANUAL', newZoom = null) => {
+    const lat = Number(newLat);
+    const lng = Number(newLon);
     setLatitude(lat);
     setLongitude(lng);
     setMapCenter([lat, lng]);
     if (newZoom) setMapZoom(newZoom);
-    setLocationSource(source);
+    setLocationSource(source === 'GPS' ? 'GPS' : 'MANUAL');
+    setIsLocationConfirmed(false);
 
     try {
       const geo = await citizenService.reverseGeocode(lat, lng);
@@ -177,87 +194,139 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
       }
       if (geo.formatted_address) {
         setAddress(geo.formatted_address);
-      } else if (geo.ward_name) {
+      } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
         setAddress(`${geo.ward_name}, Bengaluru`);
+      } else {
+        setAddress(`Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
       }
     } catch (e) {
       console.warn('Reverse geocode error:', e);
-      setAddress(`Pinned (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+      setAddress(`Pinned (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
     }
   }, []);
 
   // One-tap quick reset back to central Bengaluru
   const snapToBengaluruCentral = useCallback(() => {
     setDetectedOutsideGeo(null);
-    updateExactCoordinates(12.9716, 77.5946, 'BENGALURU_RESET', 15);
+    updateExactCoordinates(12.9715987, 77.5945627, 'MANUAL', 15);
   }, [updateExactCoordinates]);
 
-  // Fetch live browser GPS with high precision and reverse-geocode
+  // Fetch live browser GPS with high precision and reverse-geocode (Requirements 1 & 2)
   const handleGetLocation = useCallback(() => {
     setIsLocating(true);
-    if (navigator.geolocation) {
+    setGpsError(null);
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
-          const lat = Number(pos.coords.latitude.toFixed(6));
-          const lng = Number(pos.coords.longitude.toFixed(6));
-          const accuracy = Math.round(pos.coords.accuracy);
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const accuracy = Math.round(pos.coords.accuracy * 10) / 10;
+          const timestamp = new Date(pos.timestamp || Date.now()).toISOString();
+
+          setDeviceGps({ latitude: lat, longitude: lng, accuracy, timestamp });
           setGpsAccuracy(accuracy);
+          setGpsTimestamp(timestamp);
           setIsLocating(false);
-          setExifGpsDetected(false);
+          setIsLocationConfirmed(false);
+          setLocationSource('GPS');
+
+          setLatitude(lat);
+          setLongitude(lng);
+          setMapCenter([lat, lng]);
+          setMapZoom(17);
 
           try {
             const geo = await citizenService.reverseGeocode(lat, lng);
             setLocationDetails(geo);
             if (!geo.is_within_bengaluru) {
-              // Device or Wi-Fi IP is outside Bengaluru (e.g. Tamil Nadu)
               setDetectedOutsideGeo({ lat, lng, geo });
             } else {
               setDetectedOutsideGeo(null);
             }
             if (geo.formatted_address) {
               setAddress(geo.formatted_address);
-            } else if (geo.ward_name) {
+            } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
               setAddress(`${geo.ward_name}, Bengaluru`);
+            } else {
+              setAddress(`Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
             }
-            setLatitude(lat);
-            setLongitude(lng);
-            setMapCenter([lat, lng]);
-            setMapZoom(17);
-            setLocationSource('DEVICE_GPS');
           } catch (e) {
-            updateExactCoordinates(lat, lng, 'DEVICE_GPS', 17);
+            console.warn('Reverse geocode error:', e);
+            setAddress(`Device GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
           }
         },
         (err) => {
-          console.log('Location access notice: ', err.message);
+          console.warn('Location access notice: ', err.message);
           setIsLocating(false);
-          if (address === 'Detecting current location...') {
-            setAddress('Bengaluru Urban (Tap map or search street name)');
+          let msg = 'Unable to acquire device GPS.';
+          if (err.code === 1) msg = 'Location access permission was denied. Please allow location permissions or position the pin manually on the map.';
+          else if (err.code === 2) msg = 'Device GPS position unavailable. Check device location services or position the pin manually.';
+          else if (err.code === 3) msg = 'GPS acquisition timed out. Please click "Refresh GPS" or position the pin manually.';
+          setGpsError(msg);
+          if (address === 'Acquiring live device GPS...') {
+            setAddress('Bengaluru Urban (Position pin or search street)');
           }
         },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     } else {
       setIsLocating(false);
+      setGpsError('Geolocation is not supported by your browser.');
     }
-  }, [updateExactCoordinates, address]);
+  }, [address]);
+
+  // Use Current Location action: restores marker to genuine device GPS coordinates
+  const handleUseCurrentLocation = useCallback(() => {
+    if (deviceGps) {
+      setLatitude(deviceGps.latitude);
+      setLongitude(deviceGps.longitude);
+      setGpsAccuracy(deviceGps.accuracy);
+      setGpsTimestamp(deviceGps.timestamp);
+      setMapCenter([deviceGps.latitude, deviceGps.longitude]);
+      setMapZoom(17);
+      setLocationSource('GPS');
+      setIsLocationConfirmed(false);
+      citizenService.reverseGeocode(deviceGps.latitude, deviceGps.longitude)
+        .then((geo) => {
+          setLocationDetails(geo);
+          if (geo.is_within_bengaluru) {
+            setDetectedOutsideGeo(null);
+          } else {
+            setDetectedOutsideGeo({ lat: deviceGps.latitude, lng: deviceGps.longitude, geo });
+          }
+          if (geo.formatted_address) {
+            setAddress(geo.formatted_address);
+          } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
+            setAddress(`${geo.ward_name}, Bengaluru`);
+          }
+        })
+        .catch((e) => console.warn('Reverse geocode error:', e));
+    } else {
+      handleGetLocation();
+    }
+  }, [deviceGps, handleGetLocation]);
+
+  // Confirm location action
+  const handleConfirmLocation = useCallback(() => {
+    setIsLocationConfirmed(true);
+  }, []);
 
   // Auto-fetch real device GPS coordinates on page load
   useEffect(() => {
     handleGetLocation();
   }, [handleGetLocation]);
 
-  // Map Drag and Click handlers
+  // Map Drag and Click handlers (Mark source as MANUAL per Requirement 3)
   const handleMarkerDragEnd = useCallback((e) => {
     const marker = e.target;
     if (marker) {
       const pos = marker.getLatLng();
-      updateExactCoordinates(pos.lat, pos.lng, 'PIN_DRAGGED');
+      updateExactCoordinates(pos.lat, pos.lng, 'MANUAL');
     }
   }, [updateExactCoordinates]);
 
   const handleMapClick = useCallback((lat, lng) => {
-    updateExactCoordinates(lat, lng, 'PIN_CLICKED');
+    updateExactCoordinates(lat, lng, 'MANUAL');
   }, [updateExactCoordinates]);
 
   // Street / Landmark forward search
@@ -279,10 +348,10 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const handleSelectSearchResult = useCallback((item) => {
     setSearchResults([]);
     setSearchQuery(item.title || item.road || '');
-    updateExactCoordinates(item.latitude, item.longitude, 'ADDRESS_SEARCH', 17);
+    updateExactCoordinates(item.latitude, item.longitude, 'MANUAL', 17);
   }, [updateExactCoordinates]);
 
-  // Handle image selection & trigger automatic AI pre-screening + EXIF geotag parsing
+  // Handle image selection & trigger automatic AI pre-screening + EXIF geotag inspection
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -292,20 +361,27 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     setError(null);
     setAiSuggestion(null);
 
-    // 1. Instant client-side EXIF GPS check
+    // 1. Client-side EXIF GPS check (Never silently overwrite device GPS)
     const clientGps = await extractClientExifGps(file);
     if (clientGps) {
+      setPhotoExifGps(clientGps);
       setExifGpsDetected(true);
-      updateExactCoordinates(clientGps.latitude, clientGps.longitude, 'PHOTO_EXIF', 17);
+      // Only set initial map coordinates if device GPS has not been acquired
+      if (!deviceGps) {
+        updateExactCoordinates(clientGps.latitude, clientGps.longitude, 'MANUAL', 17);
+      }
+    } else {
+      setPhotoExifGps(null);
+      setExifGpsDetected(false);
     }
 
-    // 2. Trigger backend AI pre-screening with EXIF parsing & defect analysis
+    // 2. Trigger backend AI pre-screening with defect analysis
     setIsPreScreening(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const targetLat = clientGps ? clientGps.latitude : latitude;
-      const targetLon = clientGps ? clientGps.longitude : longitude;
+      const targetLat = latitude;
+      const targetLon = longitude;
       if (targetLat) formData.append('latitude', targetLat.toString());
       if (targetLon) formData.append('longitude', targetLon.toString());
 
@@ -314,10 +390,11 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
 
       // Geotag Location Recognition from Photo EXIF
       if (res.has_exif_gps && res.resolved_latitude && res.resolved_longitude) {
+        setPhotoExifGps({ latitude: res.resolved_latitude, longitude: res.resolved_longitude });
         setExifGpsDetected(true);
-        updateExactCoordinates(res.resolved_latitude, res.resolved_longitude, 'PHOTO_EXIF', 17);
-      } else if (!clientGps) {
-        setExifGpsDetected(false);
+        if (!deviceGps && !clientGps) {
+          updateExactCoordinates(res.resolved_latitude, res.resolved_longitude, 'MANUAL', 17);
+        }
       }
 
       // Category & Severity
@@ -337,6 +414,12 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     }
   };
 
+  const handleApplyPhotoGeotag = useCallback(() => {
+    if (photoExifGps) {
+      updateExactCoordinates(photoExifGps.latitude, photoExifGps.longitude, 'MANUAL', 17);
+    }
+  }, [photoExifGps, updateExactCoordinates]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -347,6 +430,10 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
       formData.append('category', category);
       formData.append('latitude', latitude.toString());
       formData.append('longitude', longitude.toString());
+      if (gpsAccuracy !== null && gpsAccuracy !== undefined) {
+        formData.append('gps_accuracy', gpsAccuracy.toString());
+      }
+      formData.append('location_source', locationSource === 'GPS' ? 'GPS' : 'MANUAL');
       formData.append('raw_text', description);
       formData.append('address', address);
       formData.append('severity', severity);
@@ -493,7 +580,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
               </div>
 
               {/* Photo Geotag Recognition Card */}
-              {exifGpsDetected && (
+              {exifGpsDetected && photoExifGps && (
                 <div className={`border rounded-xl p-3.5 flex items-start gap-3 shadow-lg animate-in fade-in ${
                   aiSuggestion && !aiSuggestion.is_within_bengaluru
                     ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
@@ -504,18 +591,27 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                   }`}>
                     <MapPin className="w-5 h-5 animate-bounce" />
                   </div>
-                  <div className="text-xs space-y-1 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold">
-                        {aiSuggestion && !aiSuggestion.is_within_bengaluru ? 'Photo Geotag (Non-Bengaluru)' : 'Photo Geotag Recognized'}
-                      </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 border border-current">EXIF GPS</span>
+                  <div className="text-xs space-y-1.5 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">
+                          {aiSuggestion && !aiSuggestion.is_within_bengaluru ? 'Photo Geotag (Non-BBMP)' : 'Photo Geotag Detected'}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 border border-current">EXIF GPS</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleApplyPhotoGeotag}
+                        className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg transition-colors shadow-sm shrink-0"
+                      >
+                        Apply Photo Coords
+                      </button>
                     </div>
                     <p className="text-slate-300 text-[11px]">
-                      Camera coordinates detected: <span className="font-mono font-semibold text-white">{latitude.toFixed(4)}° N, {longitude.toFixed(4)}° E</span>
+                      Camera coordinates detected: <span className="font-mono font-semibold text-white">{photoExifGps.latitude.toFixed(6)}° N, {photoExifGps.longitude.toFixed(6)}° E</span>
                     </p>
-                    <p className="text-[11px] font-medium text-slate-200">
-                      Location: {address}
+                    <p className="text-[10px] text-slate-400">
+                      Live device GPS is prioritized. Click "Apply Photo Coords" only if you want to pin the issue at the photo capture spot.
                     </p>
                     {aiSuggestion && !aiSuggestion.is_within_bengaluru && (
                       <p className="text-[10px] text-amber-400/90 pt-1">
@@ -738,64 +834,182 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 )}
               </div>
 
-              {/* Exact Defect Location, Interactive Leaflet Map & Search */}
+              {/* Exact Defect Location, Interactive Leaflet Map, GPS Accuracy & Controls */}
               <div className="space-y-3 pt-3 border-t border-slate-800">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <MapPin className="w-4 h-4 text-emerald-400" />
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                      3. Exact Defect Location & Map Pin
+                      3. Device GPS & Ward Verification
                     </label>
                   </div>
-                  {/* Source Badge */}
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-                    locationSource === 'PHOTO_EXIF'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                      : locationSource === 'DEVICE_GPS'
-                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
-                      : locationSource === 'ADDRESS_SEARCH'
-                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                      : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                  }`}>
-                    {locationSource === 'PHOTO_EXIF' && '📷 Photo EXIF'}
-                    {locationSource === 'DEVICE_GPS' && `📍 Live GPS ${gpsAccuracy ? `(±${gpsAccuracy}m)` : ''}`}
-                    {locationSource === 'ADDRESS_SEARCH' && '🔍 Address Search'}
-                    {locationSource === 'PIN_DRAGGED' && '🎯 Exact Pin Placed'}
-                    {locationSource === 'PIN_CLICKED' && '🎯 Map Clicked'}
-                    {locationSource === 'MANUAL_COORDINATES' && '🔢 Manual Input'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isLocationConfirmed && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Location Confirmed</span>
+                      </span>
+                    )}
+                    {/* Source Badge */}
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                      locationSource === 'GPS'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    }`}>
+                      {locationSource === 'GPS' ? '📍 Device GPS' : '🎯 Manual Pin'}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Detected Outside State Banner */}
-                {detectedOutsideGeo && (
-                  <div className="bg-amber-950/70 border border-amber-500/50 rounded-xl p-3 text-xs space-y-2 animate-in fade-in">
-                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-                      <span>Device / IP Location: {detectedOutsideGeo.geo.region_name || 'Outside Bengaluru'}</span>
-                    </div>
-                    <p className="text-slate-300 text-[11px] leading-relaxed">
-                      Your device or Wi-Fi provider reported a location outside Bengaluru municipal limits ({detectedOutsideGeo.geo.region_name || 'Tamil Nadu'}).
-                      Are you reporting an issue for Bengaluru?
-                    </p>
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={snapToBengaluruCentral}
-                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5 shadow"
-                      >
-                        <MapPin className="w-3.5 h-3.5" />
-                        <span>Snap Pin to Bengaluru Central</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDetectedOutsideGeo(null)}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs border border-slate-700"
-                      >
-                        Keep Detected Spot
-                      </button>
+                {/* GPS Accuracy Validation & Location Status Banners (Requirements 1 & 2) */}
+                {isLocating && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 flex items-center gap-2.5 text-xs text-emerald-300 animate-pulse">
+                    <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
+                    <div>
+                      <div className="font-bold">Acquiring High-Precision Device GPS...</div>
+                      <div className="text-[11px] text-slate-400">Requesting satellite coordinates from your device's browser Geolocation API</div>
                     </div>
                   </div>
                 )}
+
+                {gpsError && !isLocating && (
+                  <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl p-3.5 flex items-start justify-between gap-3 text-xs text-rose-300">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold">GPS Location Notice</div>
+                        <p className="text-slate-300 text-[11px] mt-0.5">{gpsError}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGetLocation}
+                      className="px-2.5 py-1 text-xs bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg shrink-0 transition-colors"
+                    >
+                      Retry GPS
+                    </button>
+                  </div>
+                )}
+
+                {!isLocating && locationSource === 'GPS' && gpsAccuracy !== null && (
+                  <>
+                    {/* Tier 1: High Accuracy (<= 20m) */}
+                    {gpsAccuracy <= 20 && (
+                      <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between gap-2 text-xs text-emerald-300 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>
+                            <strong className="font-mono">📍 GPS Accuracy: {gpsAccuracy}m</strong> • ✓ High accuracy location detected (&le; 20m)
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold uppercase">
+                          Accepted
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Tier 2: Moderate Accuracy (20 - 50m) */}
+                    {gpsAccuracy > 20 && gpsAccuracy <= 50 && (
+                      <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between gap-2 text-xs text-amber-300 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>
+                            <strong className="font-mono">⚠️ GPS Accuracy: {gpsAccuracy}m</strong> • Moderate accuracy (20–50m). You can drag the pin on the map for better precision.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          className="text-[10px] font-semibold px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 shrink-0 transition-colors"
+                        >
+                          Retry High-Acc
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Tier 3: Low Accuracy (> 50m) */}
+                    {gpsAccuracy > 50 && (
+                      <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl p-3.5 flex items-start justify-between gap-3 text-xs text-rose-300 shadow-sm">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-bold">⚠️ GPS accuracy is currently {gpsAccuracy}m (&gt; 50m)</div>
+                            <p className="text-slate-300 text-[11px] mt-0.5">
+                              Please enable precise/high-accuracy location on your device and retry, or position the pin manually on the map.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          className="px-3 py-1.5 bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold rounded-lg text-xs shrink-0 transition-colors shadow"
+                        >
+                          Enable High-Acc & Retry
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {locationSource === 'MANUAL' && (
+                  <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3 flex items-center justify-between gap-2 text-xs text-cyan-300 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <Crosshair className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>
+                        <strong>🎯 Manual Pin Position</strong> • Exact coordinates ({latitude.toFixed(6)}, {longitude.toFixed(6)})
+                      </span>
+                    </div>
+                    {deviceGps && (
+                      <button
+                        type="button"
+                        onClick={handleUseCurrentLocation}
+                        className="text-[10px] font-semibold px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 shrink-0 transition-colors"
+                      >
+                        Reset to Device GPS
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Location Controls Row (Requirements 1, 2 & 5) */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGetLocation}
+                      disabled={isLocating}
+                      title="Request fresh device coordinates using Geolocation API"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin text-emerald-400' : ''}`} />
+                      <span>Refresh GPS</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUseCurrentLocation}
+                      title="Reset marker to genuine device GPS coordinates"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-colors"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>Use Current Location</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleConfirmLocation}
+                      title="Validate and confirm location before submitting"
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow ${
+                        isLocationConfirmed
+                          ? 'bg-emerald-500 text-slate-950 font-black'
+                          : 'bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-700 hover:border-emerald-500'
+                      }`}
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{isLocationConfirmed ? 'Location Confirmed ✓' : 'Confirm Location'}</span>
+                    </button>
+                  </div>
+                </div>
 
                 {/* Street / Landmark Search Bar */}
                 <div className="relative">
@@ -829,15 +1043,6 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     >
                       Search
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleGetLocation}
-                      disabled={isLocating}
-                      title="Force fresh high-precision GPS lock"
-                      className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30 shrink-0 transition-colors"
-                    >
-                      {isLocating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
-                    </button>
                   </div>
 
                   {/* Autocomplete Search Dropdown */}
@@ -866,20 +1071,18 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                   )}
                 </div>
 
-                {/* Quick-Jump Locality Pills for Instant Bengaluru Navigation */}
+                {/* Quick-Jump Locality Pills */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                   <span className="text-[10px] text-slate-500 font-semibold">Quick Jump:</span>
                   {[
-                    { name: 'Kanakapura', lat: 12.5460, lon: 77.4190 },
-                    { name: 'Kanakapura Rd', lat: 12.8617, lon: 77.5303 },
                     { name: 'Koramangala', lat: 12.9352, lon: 77.6245 },
                     { name: 'Indiranagar', lat: 12.9784, lon: 77.6408 },
                     { name: 'Whitefield', lat: 12.9698, lon: 77.7500 },
                     { name: 'HSR Layout', lat: 12.9120, lon: 77.6450 },
-                    { name: 'Electronic City', lat: 12.8452, lon: 77.6602 },
-                    { name: 'Jayanagar', lat: 12.9308, lon: 77.5838 },
                     { name: 'MG Road', lat: 12.9716, lon: 77.5946 },
+                    { name: 'Jayanagar', lat: 12.9308, lon: 77.5838 },
                     { name: 'Malleshwaram', lat: 13.0031, lon: 77.5643 },
+                    { name: 'Electronic City', lat: 12.8452, lon: 77.6602 },
                     { name: 'Hebbal', lat: 13.0358, lon: 77.5970 },
                   ].map((loc) => (
                     <button
@@ -887,7 +1090,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       type="button"
                       onClick={() => {
                         setDetectedOutsideGeo(null);
-                        updateExactCoordinates(loc.lat, loc.lon, 'QUICK_LOCALITY_PICK', 16);
+                        updateExactCoordinates(loc.lat, loc.lon, 'MANUAL', 16);
                       }}
                       className="px-2 py-0.5 rounded-md bg-slate-950 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 text-[10px] border border-slate-800 hover:border-emerald-500/30 transition-colors"
                     >
@@ -897,7 +1100,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 </div>
 
                 {/* Embedded Interactive Leaflet Pinpoint Map */}
-                <div className="relative rounded-xl overflow-hidden border border-slate-800 h-56 bg-slate-950 shadow-inner">
+                <div className="relative rounded-xl overflow-hidden border border-slate-800 h-64 bg-slate-950 shadow-inner">
                   <MapContainer
                     center={mapCenter}
                     zoom={mapZoom}
@@ -913,6 +1116,18 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       zoom={mapZoom}
                       onLocationSelect={handleMapClick}
                     />
+                    {locationDetails?.geometry && (
+                      <GeoJSON
+                        key={`ward-${locationDetails.ward_number || 'geo'}`}
+                        data={locationDetails.geometry}
+                        style={{
+                          color: '#10b981',
+                          weight: 2,
+                          fillColor: '#10b981',
+                          fillOpacity: 0.12
+                        }}
+                      />
+                    )}
                     <Marker
                       position={[latitude, longitude]}
                       draggable={true}
@@ -927,7 +1142,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                   <div className="absolute top-2 left-2 right-2 pointer-events-none z-[400] flex justify-between items-center gap-2">
                     <span className="bg-slate-950/85 backdrop-blur text-[10px] text-slate-200 px-2.5 py-1 rounded-md border border-slate-800 shadow flex items-center gap-1.5">
                       <Crosshair className="w-3 h-3 text-emerald-400" />
-                      <span>Drag pin or click road for exact meter position</span>
+                      <span>Drag pin or click map to fine-tune exact defect spot</span>
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -937,31 +1152,66 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                         title="Reset map center to Bengaluru Central"
                       >
                         <Compass className="w-3 h-3" />
-                        <span>Bengaluru</span>
+                        <span>Central</span>
                       </button>
                       <span className="bg-slate-950/85 backdrop-blur font-mono text-[10px] text-emerald-400 px-2 py-1 rounded-md border border-slate-800 shadow shrink-0">
-                        {latitude.toFixed(5)}, {longitude.toFixed(5)}
+                        {latitude.toFixed(6)}, {longitude.toFixed(6)}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Resolved Exact Street Address & Ward Jurisdiction */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1.5">
-                      <span>Exact Resolved Address & Landmark:</span>
-                      <span className="inline-flex items-center gap-1 text-[9px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.2 rounded" title="BBMP Ward Boundaries — Official Government Source (BBMP GIS Cell)">
-                        <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
-                        <span>Official BBMP GIS</span>
-                      </span>
-                    </span>
-                    {locationDetails?.ward_name && (
-                      <span className="text-emerald-400 font-medium">
-                        {locationDetails.ward_name} {locationDetails.ward_number ? `(#${locationDetails.ward_number})` : ''}
-                      </span>
-                    )}
-                  </div>
+                {/* Resolved Exact Street Address & Ward Jurisdiction (Requirements 4 & 9) */}
+                <div className="space-y-2">
+                  {locationDetails?.is_within_bengaluru ? (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 font-medium flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>BBMP Ward Jurisdiction (Point-in-Polygon):</span>
+                        </span>
+                        <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+                          {locationDetails.ward_number ? `Ward #${locationDetails.ward_number}` : 'BBMP Ward'}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-sm font-bold text-white">
+                          {locationDetails.ward_name}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {locationDetails.zone_name ? `${locationDetails.zone_name} Zone` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-rose-950/40 border border-rose-500/50 rounded-xl p-3.5 space-y-2">
+                      <div className="flex items-center gap-2 text-rose-300 font-bold text-xs">
+                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>BBMP ward could not be determined for this location.</span>
+                      </div>
+                      <p className="text-slate-300 text-[11px] leading-relaxed">
+                        The pin ({latitude.toFixed(6)}, {longitude.toFixed(6)}) lies outside BBMP municipal ward boundaries ({locationDetails?.region_name || 'Non-BBMP Area'}).
+                      </p>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={snapToBengaluruCentral}
+                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5 shadow"
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span>Snap Pin to Bengaluru Central</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs border border-slate-700"
+                        >
+                          Retry Device GPS
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <input
                     type="text"
                     value={address}
@@ -969,12 +1219,6 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     placeholder="e.g. 100 Feet Rd, near Sony World Signal, 4th Block, Koramangala"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
-                  {locationDetails && !locationDetails.is_within_bengaluru && (
-                    <div className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                      <span>Note: Pin is outside official BBMP ward boundaries ({locationDetails.region_name || 'Non-BBMP'}). {locationDetails.ward_name}</span>
-                    </div>
-                  )}
                 </div>
 
                 {/* Lat / Lon Numerical Precise Controls */}
@@ -987,9 +1231,9 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       value={latitude}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
-                        if (!isNaN(val)) updateExactCoordinates(val, longitude, 'MANUAL_COORDINATES');
+                        if (!isNaN(val)) updateExactCoordinates(val, longitude, 'MANUAL');
                       }}
-                      className="bg-transparent text-right font-mono text-emerald-400 w-24 focus:outline-none text-xs"
+                      className="bg-transparent text-right font-mono text-emerald-400 w-28 focus:outline-none text-xs"
                     />
                   </div>
                   <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs">
@@ -1000,11 +1244,105 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       value={longitude}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
-                        if (!isNaN(val)) updateExactCoordinates(latitude, val, 'MANUAL_COORDINATES');
+                        if (!isNaN(val)) updateExactCoordinates(latitude, val, 'MANUAL');
                       }}
-                      className="bg-transparent text-right font-mono text-emerald-400 w-24 focus:outline-none text-xs"
+                      className="bg-transparent text-right font-mono text-emerald-400 w-28 focus:outline-none text-xs"
                     />
                   </div>
+                </div>
+
+                {/* Developer / GIS Debug Panel (Requirement 12) */}
+                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/70">
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugPanel(!showDebugPanel)}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-mono font-bold text-slate-400 hover:text-emerald-400 hover:bg-slate-900/50 transition-colors"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>DEVELOPER / GIS DEBUG PANEL (REQ 12)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-sans flex items-center gap-1">
+                      {showDebugPanel ? (
+                        <><span>Hide</span><ChevronUp className="w-3 h-3" /></>
+                      ) : (
+                        <><span>Inspect Raw GPS & GIS Data</span><ChevronDown className="w-3 h-3" /></>
+                      )}
+                    </span>
+                  </button>
+
+                  {showDebugPanel && (
+                    <div className="p-4 border-t border-slate-800/80 bg-black/40 space-y-3 text-xs font-mono">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Raw GPS Coordinates */}
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-sans">Raw Device GPS Coordinates</div>
+                          <div className="text-emerald-400 font-bold">
+                            LAT: <span className="text-white">{deviceGps ? deviceGps.latitude : latitude}</span>
+                          </div>
+                          <div className="text-emerald-400 font-bold">
+                            LON: <span className="text-white">{deviceGps ? deviceGps.longitude : longitude}</span>
+                          </div>
+                        </div>
+
+                        {/* GPS Accuracy & Timestamp */}
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-sans">GPS Accuracy & Timestamp</div>
+                          <div className="text-cyan-400">
+                            Accuracy: <span className="text-white font-bold">{gpsAccuracy !== null ? `${gpsAccuracy} meters` : 'N/A'}</span>
+                          </div>
+                          <div className="text-slate-400 text-[10px] truncate">
+                            Timestamp: <span className="text-slate-200">{gpsTimestamp || 'N/A'}</span>
+                          </div>
+                        </div>
+
+                        {/* CRS & Dataset Source */}
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-sans">CRS & Dataset Source</div>
+                          <div className="text-purple-400">
+                            CRS: <span className="text-white font-bold">{locationDetails?.crs || 'EPSG:4326 (WGS84)'}</span>
+                          </div>
+                          <div className="text-slate-400 text-[10px] truncate">
+                            Source: <span className="text-slate-200">{locationDetails?.dataset_source || 'BBMP GIS Cell / Govt of Karnataka'}</span>
+                          </div>
+                        </div>
+
+                        {/* Point-in-Polygon & Method */}
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-sans">Point-in-Polygon Result</div>
+                          <div className={locationDetails?.is_within_bengaluru ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                            Status: {locationDetails?.is_within_bengaluru ? 'INSIDE BBMP (Point matched)' : 'OUTSIDE BBMP'}
+                          </div>
+                          <div className="text-slate-400 text-[10px]">
+                            Method: <span className="text-amber-400 font-bold">{locationDetails?.ward_detection_method || (locationDetails?.is_within_bengaluru ? 'POINT_IN_POLYGON' : 'OUTSIDE_BBMP')}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Selected Ward Polygon Details */}
+                      <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wider font-sans">Selected Ward Boundary Polygon</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                          <div>
+                            <span className="text-slate-500">Ward Number: </span>
+                            <span className="text-white font-bold">{locationDetails?.ward_number ?? 'None'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Ward Name: </span>
+                            <span className="text-white font-bold truncate block">{locationDetails?.ward_name || 'BBMP ward could not be determined for this location.'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Location Source: </span>
+                            <span className="text-cyan-400 font-bold">{locationSource}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Geometry Type: </span>
+                            <span className="text-emerald-400 font-bold">{locationDetails?.geometry?.type || (locationDetails?.is_within_bengaluru ? 'Polygon' : 'None')}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

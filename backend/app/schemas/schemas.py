@@ -86,6 +86,11 @@ class ReportCreate(BaseModel):
     raw_text: Optional[str] = None
     latitude: float
     longitude: float
+    gps_accuracy: Optional[float] = None
+    location_source: Optional[str] = "GPS"
+    ward_number: Optional[int] = None
+    ward_name: Optional[str] = None
+    ward_detection_method: Optional[str] = "POINT_IN_POLYGON"
     address: Optional[str] = None
     source: Optional[str] = "manual"
     ai_confidence: Optional[float] = 0.0
@@ -110,9 +115,13 @@ class ReportOut(BaseModel):
     ai_confidence: float
     latitude: float
     longitude: float
+    gps_accuracy: Optional[float] = None
+    location_source: Optional[str] = "GPS"
+    ward_number: Optional[int] = None
+    ward_name: Optional[str] = None
+    ward_detection_method: Optional[str] = "POINT_IN_POLYGON"
     address: Optional[str] = None
     ward_id: Optional[int] = None
-    ward_name: Optional[str] = None
     incident_id: Optional[int] = None
     status: str
     created_at: datetime
@@ -159,6 +168,10 @@ class IncidentOut(BaseModel):
     status: str
     latitude: float
     longitude: float
+    gps_accuracy: Optional[float] = None
+    location_source: Optional[str] = "GPS"
+    ward_number: Optional[int] = None
+    ward_detection_method: Optional[str] = "POINT_IN_POLYGON"
     address: Optional[str] = None
     ward_id: Optional[int] = None
     ward_name: Optional[str] = None

@@ -5,11 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from backend.app.core.config import settings, BASE_DIR
-from backend.app.core.database import Base, engine
+from backend.app.core.database import Base, engine, apply_sqlite_migrations
 from backend.app.api import auth, reports, voice, drive, incidents, authority, public, admin
 
-# Create tables
+# Create tables & migrate schema
 Base.metadata.create_all(bind=engine)
+apply_sqlite_migrations()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

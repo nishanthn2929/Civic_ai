@@ -36,6 +36,16 @@ async def reverse_geocode(
 ):
     """Resolve coordinates to exact road, street address, and Bengaluru BBMP ward/zone via Point-in-Polygon."""
     loc = gis_service.resolve_location(latitude, longitude)
+    highlight_geom = None
+    if loc.get("is_within_bengaluru") and loc.get("ward_number"):
+        for feat in gis_service.wards_data:
+            if feat["properties"].get("ward_number") == loc["ward_number"]:
+                highlight_geom = feat.get("geometry")
+                break
+
+    detection_method = "POINT_IN_POLYGON" if loc.get("is_within_bengaluru") else "OUTSIDE_BBMP"
+    dataset_meta = gis_service.get_dataset_metadata()
+
     return {
         "latitude": latitude,
         "longitude": longitude,
@@ -50,9 +60,13 @@ async def reverse_geocode(
         "display_name": loc.get("display_name"),
         "is_within_bengaluru": loc.get("is_within_bengaluru", True),
         "formatted_address": loc.get("formatted_address"),
-        "detection_method": loc.get("detection_method"),
+        "detection_method": detection_method,
+        "ward_detection_method": detection_method,
         "source_verification": loc.get("source_verification", "Official Government Source (BBMP GIS Cell)"),
-        "is_estimated": loc.get("is_estimated", False)
+        "is_estimated": loc.get("is_estimated", False),
+        "crs": dataset_meta.get("coordinate_system", "EPSG:4326 (WGS84)"),
+        "dataset_source": dataset_meta.get("source_organization", "BBMP GIS Cell / Government of Karnataka"),
+        "geometry": highlight_geom
     }
 
 @router.get("/ward-source-info")
@@ -147,6 +161,8 @@ async def create_report(
     category: str = Form(...),
     latitude: float = Form(...),
     longitude: float = Form(...),
+    gps_accuracy: Optional[float] = Form(None),
+    location_source: Optional[str] = Form("GPS"),
     raw_text: Optional[str] = Form(None),
     address: Optional[str] = Form(None),
     severity: Optional[str] = Form(None),
@@ -156,7 +172,7 @@ async def create_report(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user)
 ):
-    """Submit a citizen report with full verification, duplicate detection, and incident routing."""
+    """Submit a citizen report with device GPS coordinates and point-in-polygon BBMP ward detection."""
     media_url = None
     blur_val = 150.0
     image_phash = None
@@ -167,12 +183,6 @@ async def create_report(
         contents = await file.read()
         media_url = save_media_file(contents)
         try:
-            # Check photo EXIF GPS
-            exif_data = exif_service.extract_image_metadata(contents)
-            if exif_data["has_gps"]:
-                latitude = exif_data["latitude"]
-                longitude = exif_data["longitude"]
-
             cv_res = cv_service.detect_in_image(contents)
             blur_val = cv_res["blur_score"]
             image_phash = cv_res["phash"]
@@ -193,13 +203,19 @@ async def create_report(
         lon=longitude
     )
 
-    # 2. Ward GIS lookup
-    ward_info = gis_service.find_ward_by_coordinates(latitude, longitude)
-    ward = None
-    if ward_info:
-        ward = db.query(Ward).filter(Ward.ward_number == ward_info["ward_number"]).first()
+    # 2. Authoritative Point-in-Polygon Ward Lookup (Requirement 4 & 7)
+    loc_res = gis_service.resolve_location(latitude, longitude)
+    ward_num = loc_res.get("ward_number")
+    ward_nm = loc_res.get("ward_name")
+    detection_method = "POINT_IN_POLYGON" if loc_res.get("is_within_bengaluru") else "OUTSIDE_BBMP"
 
-    # 3. Create Report record
+    ward = None
+    if ward_num:
+        ward = db.query(Ward).filter(Ward.ward_number == ward_num).first()
+
+    resolved_address = address or loc_res.get("formatted_address") or "Bengaluru"
+
+    # 3. Create Report record with exact GPS & Point-in-Polygon Ward
     user_id = current_user.id if current_user else None
     report = Report(
         user_id=user_id,
@@ -209,7 +225,12 @@ async def create_report(
         ai_confidence=ai_conf,
         latitude=latitude,
         longitude=longitude,
-        address=address or (f"{ward_info['ward_name']}, Bengaluru" if ward_info else "Bengaluru"),
+        gps_accuracy=gps_accuracy,
+        location_source=location_source or "GPS",
+        ward_number=ward_num,
+        ward_name=ward_nm,
+        ward_detection_method=detection_method,
+        address=resolved_address,
         ward_id=ward.id if ward else None,
         quality_score=quality_score,
         status=ReportStatus.VERIFIED.value if is_verified else ReportStatus.SUBMITTED.value
@@ -238,7 +259,7 @@ async def create_report(
                 bbox_y2=det["bbox"][3] if det.get("bbox") else None
             ))
 
-    # 5. Multi-Signal Duplicate Detection Engine (Section 12-13)
+    # 5. Multi-Signal Duplicate Detection Engine
     existing_incident, dup_score = duplicate_engine.find_duplicate_incident(
         db=db,
         category=category,
@@ -253,6 +274,17 @@ async def create_report(
         report.status = ReportStatus.MERGED.value
         existing_incident.reports_count += 1
         
+        # Upgrade incident GPS precision if new report provides higher accuracy
+        if gps_accuracy is not None and (existing_incident.gps_accuracy is None or gps_accuracy < existing_incident.gps_accuracy):
+            existing_incident.gps_accuracy = gps_accuracy
+            existing_incident.latitude = latitude
+            existing_incident.longitude = longitude
+            existing_incident.location_source = location_source or "GPS"
+        if not existing_incident.ward_number and ward_num:
+            existing_incident.ward_number = ward_num
+            existing_incident.ward_name = ward_nm
+            existing_incident.ward_detection_method = detection_method
+
         # Recalculate incident priority based on increased reports count
         new_priority = priority_engine.calculate_priority_score(
             severity=existing_incident.severity,
@@ -272,7 +304,6 @@ async def create_report(
         # New civic problem detected! Create fresh Incident
         dept = routing_service.get_department_for_category(db, category)
         
-        # Determine incident severity: prioritize verified user/prescreen choice
         if severity and severity.upper() in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]:
             calc_severity = severity.upper()
         else:
@@ -297,6 +328,11 @@ async def create_report(
             status=initial_status,
             latitude=latitude,
             longitude=longitude,
+            gps_accuracy=gps_accuracy,
+            location_source=location_source or "GPS",
+            ward_number=ward_num,
+            ward_name=ward_nm,
+            ward_detection_method=detection_method,
             address=report.address,
             ward_id=ward.id if ward else None,
             department_id=dept.id if dept else None,
@@ -328,9 +364,13 @@ async def create_report(
         ai_confidence=report.ai_confidence,
         latitude=report.latitude,
         longitude=report.longitude,
+        gps_accuracy=report.gps_accuracy,
+        location_source=report.location_source,
+        ward_number=report.ward_number,
+        ward_name=report.ward_name or (ward.ward_name if ward else "Bengaluru Urban"),
+        ward_detection_method=report.ward_detection_method,
         address=report.address,
         ward_id=report.ward_id,
-        ward_name=ward.ward_name if ward else "Bengaluru Urban",
         incident_id=report.incident_id,
         status=report.status,
         created_at=report.created_at,

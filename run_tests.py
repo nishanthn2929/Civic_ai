@@ -385,6 +385,93 @@ def test_suite():
         assert data["geometry"]["type"] in ["Polygon", "MultiPolygon"]
     run_test("Admin GPS Point-in-Polygon Detect API with Boundary Highlight Geometry", test_admin_ward_detect_and_highlight)
 
+    print("\n--- 11. Device GPS Accuracy, Location Source & Ward Persistence Tests ---")
+    def test_gps_accuracy_and_ward_persistence():
+        report_data = {
+            "category": "Pothole",
+            "latitude": 12.9378,
+            "longitude": 77.6205,
+            "gps_accuracy": 8.4,
+            "location_source": "GPS",
+            "raw_text": "Pothole detected via high precision GPS at Koramangala 5th Block.",
+            "source": "manual"
+        }
+        res = client.post("/api/reports/create", data=report_data)
+        assert res.status_code == 200, f"Report creation failed: {res.text}"
+        data = res.json()
+        assert abs(data["latitude"] - 12.9378) < 1e-5
+        assert abs(data["longitude"] - 77.6205) < 1e-5
+        assert data["gps_accuracy"] == 8.4
+        assert data["location_source"] == "GPS"
+        assert data["ward_number"] == 151
+        assert "Koramangala" in data["ward_name"]
+        assert data["ward_detection_method"] == "POINT_IN_POLYGON"
+
+        # Verify canonical Incident persistence in DB
+        db = SessionLocal()
+        try:
+            inc = db.query(Incident).filter(Incident.id == data["incident_id"]).first()
+            assert inc is not None
+            assert inc.gps_accuracy == 8.4
+            assert inc.location_source == "GPS"
+            assert inc.ward_number == 151
+            assert inc.ward_detection_method == "POINT_IN_POLYGON"
+        finally:
+            db.close()
+    run_test("Exact Device GPS Accuracy (8.4m) & Point-in-Polygon Persistence", test_gps_accuracy_and_ward_persistence)
+
+    def test_manual_location_source_persistence():
+        report_data = {
+            "category": "Road Damage",
+            "latitude": 12.9120,
+            "longitude": 77.6450,
+            "location_source": "MANUAL",
+            "raw_text": "User manually adjusted map pin in HSR Layout.",
+            "source": "manual"
+        }
+        res = client.post("/api/reports/create", data=report_data)
+        assert res.status_code == 200, f"Report creation failed: {res.text}"
+        data = res.json()
+        assert data["location_source"] == "MANUAL"
+        assert data["ward_number"] == 174
+        assert "HSR" in data["ward_name"]
+        assert data["ward_detection_method"] == "POINT_IN_POLYGON"
+
+        db = SessionLocal()
+        try:
+            inc = db.query(Incident).filter(Incident.id == data["incident_id"]).first()
+            assert inc is not None
+            assert inc.location_source == "MANUAL"
+            assert inc.ward_number == 174
+            assert inc.ward_detection_method == "POINT_IN_POLYGON"
+        finally:
+            db.close()
+    run_test("User-Adjusted Marker MANUAL Location Source Persistence", test_manual_location_source_persistence)
+
+    def test_reverse_geocode_debug_panel_contract():
+        # Inside Bengaluru
+        res_in = client.get("/api/reports/reverse-geocode?latitude=12.9352&longitude=77.6245")
+        assert res_in.status_code == 200
+        d_in = res_in.json()
+        assert d_in["is_within_bengaluru"] is True
+        assert d_in["ward_number"] == 151
+        assert "Koramangala" in d_in["ward_name"]
+        assert d_in["crs"] == "EPSG:4326 (WGS84)"
+        assert "BBMP" in d_in["dataset_source"]
+        assert d_in["detection_method"] == "POINT_IN_POLYGON"
+        assert d_in["geometry"] is not None
+        assert d_in["geometry"]["type"] in ["Polygon", "MultiPolygon"]
+
+        # Outside Bengaluru (Mysuru)
+        res_out = client.get("/api/reports/reverse-geocode?latitude=12.2958&longitude=76.6394")
+        assert res_out.status_code == 200
+        d_out = res_out.json()
+        assert d_out["is_within_bengaluru"] is False
+        assert d_out["ward_number"] is None
+        assert d_out["ward_name"] == "BBMP ward could not be determined."
+        assert d_out["ward_detection_method"] == "OUTSIDE_BBMP"
+    run_test("Reverse Geocode Debug Panel Contract (CRS, Geometry, Detection Method)", test_reverse_geocode_debug_panel_contract)
+
     print("\n========================================================================")
     print(f"RESULTS: {passed} PASSED, {failed} FAILED")
     print("========================================================================\n")

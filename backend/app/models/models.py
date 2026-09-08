@@ -107,6 +107,11 @@ class Report(Base):
     ai_confidence = Column(Float, default=0.0)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    gps_accuracy = Column(Float, nullable=True)  # Captured in meters
+    location_source = Column(String(50), default="GPS")  # GPS or MANUAL
+    ward_number = Column(Integer, nullable=True)
+    ward_name = Column(String(150), nullable=True)
+    ward_detection_method = Column(String(50), default="POINT_IN_POLYGON")  # POINT_IN_POLYGON or OUTSIDE_BBMP
     address = Column(String(255), nullable=True)
     ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
@@ -167,6 +172,11 @@ class Incident(Base):
     
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    gps_accuracy = Column(Float, nullable=True)
+    location_source = Column(String(50), default="GPS")
+    ward_number = Column(Integer, nullable=True)
+    ward_name = Column(String(150), nullable=True)
+    ward_detection_method = Column(String(50), default="POINT_IN_POLYGON")
     address = Column(String(255), nullable=True)
     ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
