@@ -52,6 +52,7 @@ export default function BbmpWardManager() {
   const [mapZoom, setMapZoom] = useState(11);
 
   // Point-in-polygon tester
+  const [mapType, setMapType] = useState('default'); // 'default' | 'satellite'
   const [testCoords, setTestCoords] = useState({ lat: 12.9352, lon: 77.6245 });
   const [testResult, setTestResult] = useState(null);
   const [testingGps, setTestingGps] = useState(false);
@@ -421,10 +422,29 @@ export default function BbmpWardManager() {
               scrollWheelZoom={true}
               className="w-full h-full z-0"
             >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              />
+              {mapType === 'default' ? (
+                <TileLayer
+                  key="tile-default"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                  maxZoom={20}
+                />
+              ) : (
+                <>
+                  <TileLayer
+                    key="tile-satellite"
+                    attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                  <TileLayer
+                    key="tile-satellite-labels"
+                    attribution='&copy; Esri'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                </>
+              )}
               <MapController
                 center={mapCenter}
                 zoom={mapZoom}
@@ -443,6 +463,36 @@ export default function BbmpWardManager() {
                 <Marker position={[testCoords.lat, testCoords.lon]} icon={testGpsIcon} />
               )}
             </MapContainer>
+
+            {/* Map Type Switcher (Default vs Satellite) */}
+            <div className="absolute top-3 right-3 z-[400] bg-slate-950/90 backdrop-blur rounded-lg p-0.5 border border-slate-700 shadow-md flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setMapType('default')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  mapType === 'default'
+                    ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                }`}
+                title="Default dark vector streets"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Default</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMapType('satellite')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  mapType === 'satellite'
+                    ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                }`}
+                title="High-resolution satellite imagery with street labels"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Satellite</span>
+              </button>
+            </div>
 
             {/* Map Overlay Helper */}
             <div className="absolute bottom-3 left-3 pointer-events-none z-[400] bg-slate-950/85 backdrop-blur border border-slate-800 rounded-lg p-2.5 text-[11px] text-slate-300 space-y-1 shadow-lg max-w-xs">

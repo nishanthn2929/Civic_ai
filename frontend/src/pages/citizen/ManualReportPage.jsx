@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Camera, Upload, MapPin, Sparkles, AlertTriangle, CheckCircle2,
   RefreshCw, Send, ShieldAlert, Info, Layers, Check, ShieldCheck,
-  Navigation, Search, Crosshair, Compass, ChevronDown, ChevronUp, Lock
+  Navigation, Search, Crosshair, Compass, ChevronDown, ChevronUp, Lock,
+  Globe
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -160,6 +161,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [detectedOutsideGeo, setDetectedOutsideGeo] = useState(null);
   const [isResolvingLocation, setIsResolvingLocation] = useState(false);
   const [deviceOutsideNotice, setDeviceOutsideNotice] = useState(null);
+  const [mapType, setMapType] = useState('default'); // 'default' | 'satellite'
 
   // Search & Loading States
   const [searchQuery, setSearchQuery] = useState('');
@@ -1176,10 +1178,29 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     scrollWheelZoom={true}
                     className="w-full h-full z-0"
                   >
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                      url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                    />
+                    {mapType === 'default' ? (
+                      <TileLayer
+                        key="tile-default"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                        maxZoom={20}
+                      />
+                    ) : (
+                      <>
+                        <TileLayer
+                          key="tile-satellite"
+                          attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                          maxZoom={19}
+                        />
+                        <TileLayer
+                          key="tile-satellite-labels"
+                          attribution='&copy; Esri'
+                          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+                          maxZoom={19}
+                        />
+                      </>
+                    )}
                     <MapController
                       center={mapCenter}
                       zoom={mapZoom}
@@ -1187,13 +1208,13 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     />
                     {locationDetails?.geometry && (
                       <GeoJSON
-                        key={`ward-${locationDetails.ward_number || 'geo'}`}
+                        key={`ward-${locationDetails.ward_number || 'geo'}-${mapType}`}
                         data={locationDetails.geometry}
                         style={{
                           color: '#10b981',
                           weight: 2,
                           fillColor: '#10b981',
-                          fillOpacity: 0.12
+                          fillOpacity: mapType === 'satellite' ? 0.2 : 0.12
                         }}
                       />
                     )}
@@ -1206,6 +1227,36 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       icon={pinpointIcon}
                     />
                   </MapContainer>
+
+                  {/* Bottom-left Map Type Switcher (Default vs Satellite) */}
+                  <div className="absolute bottom-2 left-2 pointer-events-auto z-[400] bg-slate-950/90 backdrop-blur rounded-lg p-0.5 border border-slate-700 shadow-md flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setMapType('default')}
+                      className={`px-2 py-1 rounded text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                        mapType === 'default'
+                          ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                      title="Default dark vector streets"
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>Default</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMapType('satellite')}
+                      className={`px-2 py-1 rounded text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                        mapType === 'satellite'
+                          ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                      title="High-resolution satellite imagery with street labels"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>Satellite</span>
+                    </button>
+                  </div>
 
                   {/* Top Map Helper Overlay */}
                   <div className="absolute top-2 left-2 right-2 pointer-events-none z-[400] flex justify-between items-center gap-2">

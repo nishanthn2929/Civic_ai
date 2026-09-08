@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON } from 'react-leaflet';
 import L from 'leaflet';
+import { Layers, Globe } from 'lucide-react';
 
 // Create custom colored circle icons
 const createCustomIcon = (severity, status) => {
@@ -39,6 +40,7 @@ const createCustomIcon = (severity, status) => {
 };
 
 export default function IncidentMap({ incidents = [], wardGeoJson = null, onSelectIncident, selectedIncident = null }) {
+  const [mapType, setMapType] = useState('default'); // 'default' | 'satellite'
   const defaultCenter = [12.9716, 77.5946]; // Bengaluru Central
   const defaultZoom = 12;
 
@@ -55,7 +57,7 @@ export default function IncidentMap({ incidents = [], wardGeoJson = null, onSele
       opacity: 0.8,
       color: '#38bdf8',
       dashArray: '3',
-      fillOpacity: 0.12
+      fillOpacity: mapType === 'satellite' ? 0.2 : 0.12
     };
   };
 
@@ -75,11 +77,30 @@ export default function IncidentMap({ incidents = [], wardGeoJson = null, onSele
   return (
     <div className="w-full h-full min-h-[420px] rounded-xl overflow-hidden border border-slate-800 shadow-xl bg-slate-950 relative">
       <MapContainer center={defaultCenter} zoom={defaultZoom} scrollWheelZoom={true} className="w-full h-full">
-        {/* Dark Tile Layer */}
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        />
+        {/* Vector Dark vs Satellite Tile Layer */}
+        {mapType === 'default' ? (
+          <TileLayer
+            key="tile-default"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            maxZoom={20}
+          />
+        ) : (
+          <>
+            <TileLayer
+              key="tile-satellite"
+              attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+            <TileLayer
+              key="tile-satellite-labels"
+              attribution='&copy; Esri'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+          </>
+        )}
 
         {/* Bengaluru Wards GeoJSON boundaries */}
         {wardGeoJson && (
@@ -133,6 +154,36 @@ export default function IncidentMap({ incidents = [], wardGeoJson = null, onSele
           </Marker>
         ))}
       </MapContainer>
+
+      {/* Map Type Switcher (Default vs Satellite) */}
+      <div className="absolute top-4 right-4 z-[400] bg-slate-950/90 backdrop-blur rounded-lg p-0.5 border border-slate-700 shadow-md flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => setMapType('default')}
+          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all flex items-center gap-1.5 ${
+            mapType === 'default'
+              ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+          }`}
+          title="Default dark vector streets"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Default</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMapType('satellite')}
+          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all flex items-center gap-1.5 ${
+            mapType === 'satellite'
+              ? 'bg-emerald-500 text-slate-950 shadow font-bold'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+          }`}
+          title="High-resolution satellite imagery with street labels"
+        >
+          <Globe className="w-3.5 h-3.5" />
+          <span>Satellite</span>
+        </button>
+      </div>
 
       {/* Map Legend */}
       <div className="absolute bottom-4 left-4 z-[400] bg-slate-900/90 backdrop-blur-md border border-slate-800 p-2.5 rounded-lg shadow-lg text-[11px] text-slate-300">
