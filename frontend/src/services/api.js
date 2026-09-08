@@ -56,6 +56,12 @@ export const citizenService = {
     });
     return res.data;
   },
+  searchLocation: async (query) => {
+    const res = await api.get('/reports/search-location', {
+      params: { q: query }
+    });
+    return res.data?.results || [];
+  },
   createReport: async (formData) => {
     const res = await api.post('/reports/create', formData);
     return res.data;

@@ -34,7 +34,7 @@ async def reverse_geocode(
     latitude: float = Query(...),
     longitude: float = Query(...)
 ):
-    """Resolve coordinates to exact Bengaluru BBMP ward/zone or outside regional hub."""
+    """Resolve coordinates to exact road, street address, and Bengaluru BBMP ward/zone."""
     loc = gis_service.resolve_location(latitude, longitude)
     return {
         "latitude": latitude,
@@ -43,9 +43,22 @@ async def reverse_geocode(
         "zone_name": loc["zone_name"],
         "ward_number": loc.get("ward_number"),
         "region_name": loc.get("region_name"),
+        "state": loc.get("state"),
+        "pincode": loc.get("pincode"),
+        "exact_road": loc.get("exact_road"),
+        "exact_neighbourhood": loc.get("exact_neighbourhood"),
+        "display_name": loc.get("display_name"),
         "is_within_bengaluru": loc.get("is_within_bengaluru", True),
         "formatted_address": loc.get("formatted_address")
     }
+
+@router.get("/search-location")
+async def search_location(
+    q: str = Query(..., min_length=2, description="Address or landmark query")
+):
+    """Forward search address, road or landmark in Bengaluru with BBMP ward resolution."""
+    results = gis_service.search_address(q)
+    return {"results": results}
 
 @router.post("/prescreen", response_model=ReportPreScreenResponse)
 async def prescreen_report(

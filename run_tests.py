@@ -286,6 +286,34 @@ def test_suite():
         db.close()
     run_test("Citizen-Verified Severity Persisted in Canonical Incident", test_custom_severity_persisted_in_incident)
 
+    print("\n--- 9. Exact Geocoding & Landmark Search Tests ---")
+    def test_exact_reverse_geocode():
+        res = client.get("/api/reports/reverse-geocode?latitude=12.9352&longitude=77.6245")
+        assert res.status_code == 200, f"Reverse geocode failed: {res.text}"
+        data = res.json()
+        assert data["ward_name"] == "Koramangala"
+        assert data["zone_name"] == "South"
+        assert data["is_within_bengaluru"] is True
+        assert "formatted_address" in data and len(data["formatted_address"]) > 5
+    run_test("Exact Reverse Geocoding with BBMP Ward Resolution", test_exact_reverse_geocode)
+
+    def test_landmark_forward_search():
+        res = client.get("/api/reports/search-location?q=Brigade Road")
+        assert res.status_code == 200, f"Search location failed: {res.text}"
+        data = res.json()
+        assert "results" in data
+        assert isinstance(data["results"], list)
+    run_test("Forward Geocoding Landmark Search API", test_landmark_forward_search)
+
+    def test_outside_bengaluru_geotag_resolution():
+        # Coordinates in Mysuru
+        res = client.get("/api/reports/reverse-geocode?latitude=12.2958&longitude=76.6394")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["is_within_bengaluru"] is False
+        assert "Mysuru" in data["ward_name"] or "Mysuru" in data["formatted_address"]
+    run_test("Non-Bengaluru Coordinates Accurately Flagged with Regional Identity", test_outside_bengaluru_geotag_resolution)
+
     print("\n========================================================================")
     print(f"RESULTS: {passed} PASSED, {failed} FAILED")
     print("========================================================================\n")

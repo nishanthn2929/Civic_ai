@@ -19,7 +19,7 @@ def main():
     print(" -> Public Portal:    http://localhost:8000 (Default view)")
     print("\nPress Ctrl+C to stop the server.\n")
 
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
 
 if __name__ == "__main__":
     main()
