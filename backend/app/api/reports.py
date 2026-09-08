@@ -110,28 +110,52 @@ async def prescreen_report(
     exif_lat = exif_data["latitude"]
     exif_lon = exif_data["longitude"]
 
-    # Prioritize photo's genuine EXIF GPS tags if present
-    if has_exif_gps:
+    # Check whether photo EXIF coordinates or passed report coordinates are inside BBMP
+    exif_ward = gis_service.find_ward_by_coordinates(exif_lat, exif_lon) if (has_exif_gps and exif_lat is not None and exif_lon is not None) else None
+    user_ward = gis_service.find_ward_by_coordinates(latitude, longitude) if (latitude is not None and longitude is not None) else None
+
+    # Resolution hierarchy:
+    # 1. If photo has genuine EXIF GPS inside BBMP, prioritize it
+    if exif_ward and exif_ward.get("is_within_bengaluru"):
         resolved_lat = exif_lat
         resolved_lon = exif_lon
         location_source = "EXIF_PHOTO_GEOTAG"
-    else:
-        resolved_lat = latitude if latitude is not None else settings.BLR_CENTER_LAT
-        resolved_lon = longitude if longitude is not None else settings.BLR_CENTER_LNG
+        ward_info = exif_ward
+    # 2. If user provided coordinates inside BBMP, prioritize active user location
+    elif user_ward and user_ward.get("is_within_bengaluru"):
+        resolved_lat = latitude
+        resolved_lon = longitude
         location_source = "DEVICE_OR_MANUAL"
+        ward_info = user_ward
+    # 3. If photo has EXIF GPS (even outside BBMP), use photo geotag
+    elif has_exif_gps and exif_ward:
+        resolved_lat = exif_lat
+        resolved_lon = exif_lon
+        location_source = "EXIF_PHOTO_GEOTAG"
+        ward_info = exif_ward
+    # 4. If user coordinates provided (even outside BBMP), use user coordinates
+    elif user_ward:
+        resolved_lat = latitude
+        resolved_lon = longitude
+        location_source = "DEVICE_OR_MANUAL"
+        ward_info = user_ward
+    # 5. Default fallback
+    else:
+        resolved_lat = settings.BLR_CENTER_LAT
+        resolved_lon = settings.BLR_CENTER_LNG
+        location_source = "DEFAULT"
+        ward_info = gis_service.find_ward_by_coordinates(resolved_lat, resolved_lon) or {
+            "ward_name": "Shantala Nagar",
+            "ward_number": 111,
+            "zone_name": "East",
+            "formatted_address": "Bengaluru Central",
+            "is_within_bengaluru": True
+        }
 
     # 2. Computer Vision detection & explainable severity
     cv_res = cv_service.detect_in_image(contents)
 
-    # 3. Bengaluru Ward lookup via Point-in-Polygon
-    ward_info = gis_service.find_ward_by_coordinates(resolved_lat, resolved_lon) or {
-        "ward_name": "Bengaluru Urban",
-        "zone_name": "Central",
-        "formatted_address": "Bengaluru Urban",
-        "is_within_bengaluru": True
-    }
-
-    # 4. Department suggestion
+    # 3. Department suggestion
     dept_code = routing_service.CATEGORY_TO_DEPT_CODE.get(cv_res["detected_category"], "BBMP_ROADS")
 
     return ReportPreScreenResponse(
@@ -150,7 +174,8 @@ async def prescreen_report(
         resolved_longitude=resolved_lon,
         location_source=location_source,
         bengaluru_ward=ward_info["ward_name"],
-        bengaluru_zone=ward_info["zone_name"],
+        bengaluru_zone=ward_info.get("zone_name"),
+        ward_number=ward_info.get("ward_number"),
         formatted_address=ward_info.get("formatted_address"),
         is_within_bengaluru=ward_info.get("is_within_bengaluru", True),
         suggested_department=dept_code

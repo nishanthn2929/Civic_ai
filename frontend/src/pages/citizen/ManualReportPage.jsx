@@ -615,7 +615,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     </p>
                     {aiSuggestion && !aiSuggestion.is_within_bengaluru && (
                       <p className="text-[10px] text-amber-400/90 pt-1">
-                        ⚠️ Note: This image was captured outside Bengaluru BBMP municipal boundaries ({aiSuggestion.bengaluru_ward}).
+                        ⚠️ Note: This image was captured outside Bengaluru BBMP municipal boundaries.
                       </p>
                     )}
                   </div>
@@ -675,8 +675,36 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                       </span>
                     </div>
                     <div className="bg-slate-900 p-2 rounded-lg">
-                      <span className="text-slate-400 text-[10px] block">BBMP Ward</span>
-                      <span className="font-semibold text-white truncate block">{aiSuggestion.bengaluru_ward}</span>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-slate-400 text-[10px] block">BBMP Ward</span>
+                        {(locationDetails?.is_within_bengaluru || aiSuggestion.is_within_bengaluru) && (locationDetails?.ward_name || (aiSuggestion.bengaluru_ward && aiSuggestion.bengaluru_ward !== 'BBMP ward could not be determined.')) ? (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">
+                            {(locationDetails?.is_within_bengaluru ? locationDetails.ward_number : aiSuggestion.ward_number) ? `#${locationDetails?.is_within_bengaluru ? locationDetails.ward_number : aiSuggestion.ward_number}` : 'BBMP'}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/30">
+                            Outside BBMP
+                          </span>
+                        )}
+                      </div>
+                      {(locationDetails?.is_within_bengaluru || aiSuggestion.is_within_bengaluru) && (locationDetails?.ward_name || (aiSuggestion.bengaluru_ward && aiSuggestion.bengaluru_ward !== 'BBMP ward could not be determined.')) ? (
+                        <span className="font-semibold text-emerald-400 text-xs block truncate" title={locationDetails?.is_within_bengaluru ? locationDetails.ward_name : aiSuggestion.bengaluru_ward}>
+                          {locationDetails?.is_within_bengaluru ? locationDetails.ward_name : aiSuggestion.bengaluru_ward}
+                        </span>
+                      ) : (
+                        <div className="space-y-0.5">
+                          <span className="font-semibold text-amber-400 text-[11px] block leading-tight" title="BBMP ward could not be determined for this location.">
+                            Outside BBMP Limits
+                          </span>
+                          <button
+                            type="button"
+                            onClick={snapToBengaluruCentral}
+                            className="text-[9px] text-emerald-400 hover:text-emerald-300 underline font-medium block"
+                          >
+                            Snap to Central &rarr;
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <div className="bg-slate-900 p-2 rounded-lg">
                       <span className="text-slate-400 text-[10px] block">Laplacian Clarity</span>
