@@ -158,6 +158,8 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
   const [mapZoom, setMapZoom] = useState(16);
   const [locationDetails, setLocationDetails] = useState(null);
   const [detectedOutsideGeo, setDetectedOutsideGeo] = useState(null);
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [deviceOutsideNotice, setDeviceOutsideNotice] = useState(null);
 
   // Search & Loading States
   const [searchQuery, setSearchQuery] = useState('');
@@ -181,8 +183,9 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     setLongitude(lng);
     setMapCenter([lat, lng]);
     if (newZoom) setMapZoom(newZoom);
-    setLocationSource(source === 'GPS' ? 'GPS' : 'MANUAL');
+    setLocationSource(source === 'GPS' ? 'GPS' : (source === 'DEFAULT' ? 'DEFAULT' : 'MANUAL'));
     setIsLocationConfirmed(false);
+    setIsResolvingLocation(true);
 
     try {
       const geo = await citizenService.reverseGeocode(lat, lng);
@@ -202,6 +205,8 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
     } catch (e) {
       console.warn('Reverse geocode error:', e);
       setAddress(`Pinned (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+    } finally {
+      setIsResolvingLocation(false);
     }
   }, []);
 
@@ -227,94 +232,106 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
           setGpsAccuracy(accuracy);
           setGpsTimestamp(timestamp);
           setIsLocating(false);
-          setIsLocationConfirmed(false);
-          setLocationSource('GPS');
-
-          setLatitude(lat);
-          setLongitude(lng);
-          setMapCenter([lat, lng]);
-          setMapZoom(17);
 
           try {
             const geo = await citizenService.reverseGeocode(lat, lng);
-            setLocationDetails(geo);
-            if (!geo.is_within_bengaluru) {
-              setDetectedOutsideGeo({ lat, lng, geo });
-            } else {
+            if (geo.is_within_bengaluru) {
+              // Device is physically inside BBMP boundaries
+              setDeviceOutsideNotice(null);
               setDetectedOutsideGeo(null);
-            }
-            if (geo.formatted_address) {
-              setAddress(geo.formatted_address);
-            } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
-              setAddress(`${geo.ward_name}, Bengaluru`);
+              setLatitude(lat);
+              setLongitude(lng);
+              setMapCenter([lat, lng]);
+              setMapZoom(17);
+              setLocationSource('GPS');
+              setIsLocationConfirmed(false);
+              setLocationDetails(geo);
+              if (geo.formatted_address) {
+                setAddress(geo.formatted_address);
+              } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
+                setAddress(`${geo.ward_name}, Bengaluru`);
+              } else {
+                setAddress(`Device GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+              }
             } else {
-              setAddress(`Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+              // Device GPS is outside BBMP (e.g. testing remotely from Mumbai, Delhi, or outer region)
+              // Keep map active in Central Bengaluru so the reporting workflow remains fully functional
+              setDeviceOutsideNotice({
+                lat,
+                lng,
+                accuracy,
+                region_name: geo.region_name || 'Non-BBMP Area',
+                formatted_address: geo.formatted_address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+              });
+              setLocationDetails((prev) => {
+                if (!prev || !prev.is_within_bengaluru) {
+                  updateExactCoordinates(12.9715987, 77.5945627, 'DEFAULT', 15);
+                }
+                return prev;
+              });
             }
           } catch (e) {
-            console.warn('Reverse geocode error:', e);
-            setAddress(`Device GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+            console.warn('Reverse geocode error for GPS:', e);
+            setLocationDetails((prev) => {
+              if (!prev) updateExactCoordinates(12.9715987, 77.5945627, 'DEFAULT', 15);
+              return prev;
+            });
           }
         },
         (err) => {
           console.warn('Location access notice: ', err.message);
           setIsLocating(false);
           let msg = 'Unable to acquire device GPS.';
-          if (err.code === 1) msg = 'Location access permission was denied. Please allow location permissions or position the pin manually on the map.';
-          else if (err.code === 2) msg = 'Device GPS position unavailable. Check device location services or position the pin manually.';
-          else if (err.code === 3) msg = 'GPS acquisition timed out. Please click "Refresh GPS" or position the pin manually.';
+          if (err.code === 1) msg = 'Location access permission was denied. Position the pin manually or use Quick Jump.';
+          else if (err.code === 2) msg = 'Device GPS position unavailable. Check location services or position the pin manually.';
+          else if (err.code === 3) msg = 'GPS acquisition timed out. Position the pin manually or retry.';
           setGpsError(msg);
-          if (address === 'Acquiring live device GPS...') {
-            setAddress('Bengaluru Urban (Position pin or search street)');
-          }
+          setLocationDetails((prev) => {
+            if (!prev) updateExactCoordinates(12.9715987, 77.5945627, 'DEFAULT', 15);
+            return prev;
+          });
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
       );
     } else {
       setIsLocating(false);
       setGpsError('Geolocation is not supported by your browser.');
+      setLocationDetails((prev) => {
+        if (!prev) updateExactCoordinates(12.9715987, 77.5945627, 'DEFAULT', 15);
+        return prev;
+      });
     }
-  }, [address]);
+  }, [updateExactCoordinates]);
 
   // Use Current Location action: restores marker to genuine device GPS coordinates
   const handleUseCurrentLocation = useCallback(() => {
     if (deviceGps) {
-      setLatitude(deviceGps.latitude);
-      setLongitude(deviceGps.longitude);
+      updateExactCoordinates(deviceGps.latitude, deviceGps.longitude, 'GPS', 17);
       setGpsAccuracy(deviceGps.accuracy);
       setGpsTimestamp(deviceGps.timestamp);
-      setMapCenter([deviceGps.latitude, deviceGps.longitude]);
-      setMapZoom(17);
-      setLocationSource('GPS');
-      setIsLocationConfirmed(false);
-      citizenService.reverseGeocode(deviceGps.latitude, deviceGps.longitude)
-        .then((geo) => {
-          setLocationDetails(geo);
-          if (geo.is_within_bengaluru) {
-            setDetectedOutsideGeo(null);
-          } else {
-            setDetectedOutsideGeo({ lat: deviceGps.latitude, lng: deviceGps.longitude, geo });
-          }
-          if (geo.formatted_address) {
-            setAddress(geo.formatted_address);
-          } else if (geo.ward_name && geo.ward_name !== 'BBMP ward could not be determined.') {
-            setAddress(`${geo.ward_name}, Bengaluru`);
-          }
-        })
-        .catch((e) => console.warn('Reverse geocode error:', e));
     } else {
       handleGetLocation();
     }
-  }, [deviceGps, handleGetLocation]);
+  }, [deviceGps, handleGetLocation, updateExactCoordinates]);
+
+  // Action to intentionally move pin to outside-BBMP device GPS
+  const handlePinToOutsideDeviceGps = useCallback(() => {
+    if (deviceOutsideNotice) {
+      updateExactCoordinates(deviceOutsideNotice.lat, deviceOutsideNotice.lng, 'GPS', 17);
+      setGpsAccuracy(deviceOutsideNotice.accuracy);
+    }
+  }, [deviceOutsideNotice, updateExactCoordinates]);
 
   // Confirm location action
   const handleConfirmLocation = useCallback(() => {
     setIsLocationConfirmed(true);
   }, []);
 
-  // Auto-fetch real device GPS coordinates on page load
+  // Auto-resolve initial coordinates immediately on mount and query device GPS
   useEffect(() => {
+    updateExactCoordinates(12.9715987, 77.5945627, 'DEFAULT', 15);
     handleGetLocation();
-  }, [handleGetLocation]);
+  }, [handleGetLocation, updateExactCoordinates]);
 
   // Map Drag and Click handlers (Mark source as MANUAL per Requirement 3)
   const handleMarkerDragEnd = useCallback((e) => {
@@ -1110,7 +1127,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     { name: 'MG Road', lat: 12.9716, lon: 77.5946 },
                     { name: 'Jayanagar', lat: 12.9308, lon: 77.5838 },
                     { name: 'Malleshwaram', lat: 13.0031, lon: 77.5643 },
-                    { name: 'Electronic City', lat: 12.8452, lon: 77.6602 },
+                    { name: 'Electronic City', lat: 12.8800, lon: 77.6528 },
                     { name: 'Hebbal', lat: 13.0358, lon: 77.5970 },
                   ].map((loc) => (
                     <button
@@ -1126,6 +1143,30 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                     </button>
                   ))}
                 </div>
+
+                {/* Device Outside Notice Banner */}
+                {deviceOutsideNotice && locationDetails?.is_within_bengaluru && (
+                  <div className="bg-blue-950/40 border border-blue-500/40 rounded-xl p-3 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-sm">
+                    <div className="flex items-start gap-2">
+                      <Crosshair className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-blue-300">Live Device GPS: {deviceOutsideNotice.region_name}</span>
+                        <p className="text-[11px] text-slate-300">
+                          Your browser GPS is located outside BBMP municipal boundaries. The map pin is kept at Central Bengaluru (<strong>Ward #111 Shantala Nagar</strong>) for reporting civic defects.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={handlePinToOutsideDeviceGps}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700 font-medium transition-colors"
+                      >
+                        Pin to My GPS ({deviceOutsideNotice.region_name.split(',')[0]})
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Embedded Interactive Leaflet Pinpoint Map */}
                 <div className="relative rounded-xl overflow-hidden border border-slate-800 h-64 bg-slate-950 shadow-inner">
@@ -1191,7 +1232,12 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
 
                 {/* Resolved Exact Street Address & Ward Jurisdiction (Requirements 4 & 9) */}
                 <div className="space-y-2">
-                  {locationDetails?.is_within_bengaluru ? (
+                  {isResolvingLocation || isLocating ? (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex items-center gap-3">
+                      <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+                      <span className="text-xs text-slate-300">Resolving BBMP ward jurisdiction...</span>
+                    </div>
+                  ) : locationDetails?.is_within_bengaluru ? (
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-slate-400 font-medium flex items-center gap-1.5">

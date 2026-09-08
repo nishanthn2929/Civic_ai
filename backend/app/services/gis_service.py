@@ -258,6 +258,48 @@ class BengaluruGISService:
                     "source_verification": "Official Government Source (BBMP GIS Cell)"
                 }
 
+        # 1b. Boundary margin check (~40 meters / 0.0004 deg) to bridge road medians and border margins
+        matched_item = None
+        for item in self.parsed_wards:
+            b = item["bounds"]
+            if not (b[0] - 0.0004 <= lon <= b[2] + 0.0004 and b[1] - 0.0004 <= lat <= b[3] + 0.0004):
+                continue
+            geom = item["geometry"]
+            if geom.distance(pt) <= 0.0004:
+                matched_item = item
+                break
+
+        if matched_item:
+            props = matched_item["properties"]
+            base_addr = f"{props['ward_name']}, {props.get('zone_name', 'Bengaluru')} Zone, Bengaluru"
+            if osm_info and osm_info.get("road"):
+                road_part = f"#{osm_info['house_number']} {osm_info['road']}".strip() if osm_info.get("house_number") else osm_info["road"]
+                parts = [p for p in [road_part, osm_info.get("neighbourhood"), props["ward_name"]] if p]
+                base_addr = f"{', '.join(parts)}, {props.get('zone_name', 'Bengaluru')} Zone, Bengaluru"
+                if osm_info.get("postcode"):
+                    base_addr += f" - {osm_info['postcode']}"
+            elif props.get("pincode"):
+                base_addr += f" - {props['pincode']}"
+
+            return {
+                "is_within_bengaluru": True,
+                "ward_number": props["ward_number"],
+                "ward_name": props["ward_name"],
+                "zone_name": props.get("zone_name") or "Bengaluru",
+                "pincode": osm_info.get("postcode") if osm_info and osm_info.get("postcode") else props.get("pincode"),
+                "assembly_constituency": props.get("assembly_constituency"),
+                "parliament_constituency": props.get("parliament_constituency"),
+                "region_name": "Bengaluru Urban",
+                "exact_road": osm_info.get("road") if osm_info else None,
+                "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
+                "display_name": osm_info.get("display_name") if osm_info else None,
+                "formatted_address": base_addr,
+                "detection_method": "EXACT_POINT_IN_POLYGON",
+                "is_estimated": False,
+                "approximate": False,
+                "source_verification": "Official Government Source (BBMP GIS Cell)"
+            }
+
         # 2. Point is OUTSIDE EVERY BBMP WARD POLYGON (Rule 9: Do Not Guess)
         if osm_info and (osm_info.get("city") or osm_info.get("state") or osm_info.get("state_district")):
             loc_label = osm_info.get("town") or osm_info.get("city") or osm_info.get("county") or osm_info.get("state_district") or "Outside Area"
