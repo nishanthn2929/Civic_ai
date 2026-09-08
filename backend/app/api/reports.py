@@ -34,7 +34,7 @@ async def reverse_geocode(
     latitude: float = Query(...),
     longitude: float = Query(...)
 ):
-    """Resolve coordinates to exact road, street address, and Bengaluru BBMP ward/zone."""
+    """Resolve coordinates to exact road, street address, and Bengaluru BBMP ward/zone via Point-in-Polygon."""
     loc = gis_service.resolve_location(latitude, longitude)
     return {
         "latitude": latitude,
@@ -49,7 +49,26 @@ async def reverse_geocode(
         "exact_neighbourhood": loc.get("exact_neighbourhood"),
         "display_name": loc.get("display_name"),
         "is_within_bengaluru": loc.get("is_within_bengaluru", True),
-        "formatted_address": loc.get("formatted_address")
+        "formatted_address": loc.get("formatted_address"),
+        "detection_method": loc.get("detection_method"),
+        "source_verification": loc.get("source_verification", "Official Government Source (BBMP GIS Cell)"),
+        "is_estimated": loc.get("is_estimated", False)
+    }
+
+@router.get("/ward-source-info")
+async def get_ward_source_info():
+    """Return official BBMP ward dataset source information for transparency (Requirement 11)."""
+    meta = gis_service.get_dataset_metadata()
+    return {
+        "title": "BBMP Ward Boundaries — Official Government Source",
+        "source_organization": meta.get("source_organization", "Bruhat Bengaluru Mahanagara Palike (BBMP) GIS Cell / Government of Karnataka"),
+        "dataset_version": meta.get("dataset_version", "BBMP-198-2015-V1"),
+        "dataset_date": meta.get("dataset_date", "2015-10-01"),
+        "coordinate_system": meta.get("coordinate_system", "EPSG:4326 (WGS84)"),
+        "source_url": meta.get("source_url", "https://data.opencity.in/dataset/bbmp-ward-information"),
+        "download_date": meta.get("download_date", "2026-09-08"),
+        "ward_count": meta.get("ward_count", len(gis_service.wards_data)),
+        "license": meta.get("license", "Open Government Data (OGD) Karnataka / Public Record")
     }
 
 @router.get("/search-location")

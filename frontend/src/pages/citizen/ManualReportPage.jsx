@@ -949,7 +949,13 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                 {/* Resolved Exact Street Address & Ward Jurisdiction */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span>Exact Resolved Address & Landmark:</span>
+                    <span className="flex items-center gap-1.5">
+                      <span>Exact Resolved Address & Landmark:</span>
+                      <span className="inline-flex items-center gap-1 text-[9px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.2 rounded" title="BBMP Ward Boundaries — Official Government Source (BBMP GIS Cell)">
+                        <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>Official BBMP GIS</span>
+                      </span>
+                    </span>
                     {locationDetails?.ward_name && (
                       <span className="text-emerald-400 font-medium">
                         {locationDetails.ward_name} {locationDetails.ward_number ? `(#${locationDetails.ward_number})` : ''}
@@ -966,7 +972,7 @@ export default function ManualReportPage({ currentUser, onReportSuccess }) {
                   {locationDetails && !locationDetails.is_within_bengaluru && (
                     <div className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 flex items-center gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                      <span>Note: Pin is in {locationDetails.region_name || 'Outside BBMP'}. Report will be tagged under regional jurisdiction.</span>
+                      <span>Note: Pin is outside official BBMP ward boundaries ({locationDetails.region_name || 'Non-BBMP'}). {locationDetails.ward_name}</span>
                     </div>
                   )}
                 </div>

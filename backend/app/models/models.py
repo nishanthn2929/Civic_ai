@@ -327,3 +327,42 @@ class AuditLog(Base):
     details_json = Column(Text, nullable=True)
     ip_address = Column(String(45), nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+# Authoritative BBMP Ward Boundaries (Requirement 6)
+class BBMPWard(Base):
+    __tablename__ = "bbmp_wards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ward_number = Column(Integer, index=True, nullable=False)
+    ward_name = Column(String(150), index=True, nullable=False)
+    zone_name = Column(String(100), nullable=True)
+    assembly_constituency = Column(String(150), nullable=True)
+    parliament_constituency = Column(String(150), nullable=True)
+    geometry = Column(Text, nullable=False)  # GeoJSON Polygon / MultiPolygon string
+    source = Column(String(200), nullable=False)
+    source_url = Column(String(300), nullable=False)
+    dataset_version = Column(String(50), nullable=False)
+    dataset_date = Column(String(50), nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+# Data-source records & version registry (Requirement 2 & 10)
+class BBMPWardDataset(Base):
+    __tablename__ = "bbmp_ward_datasets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_name = Column(String(200), nullable=False)
+    source_organization = Column(String(200), nullable=False)
+    source_url = Column(String(300), nullable=False)
+    dataset_version = Column(String(50), nullable=False)
+    dataset_date = Column(String(50), nullable=False)
+    download_date = Column(String(50), nullable=False)
+    coordinate_system = Column(String(50), default="EPSG:4326")
+    ward_count = Column(Integer, nullable=False)
+    valid_wards = Column(Integer, nullable=False)
+    invalid_wards = Column(Integer, default=0)
+    license_info = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+

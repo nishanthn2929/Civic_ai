@@ -7,7 +7,8 @@ from backend.app.core.database import SessionLocal, Base, engine
 from backend.app.core.security import get_password_hash
 from backend.app.models.models import (
     User, UserRole, Department, Ward, Incident, IncidentStatus, IncidentSeverity,
-    IncidentStatusHistory, Resolution, Report, ReportMedia, ConfigSetting, AuditLog
+    IncidentStatusHistory, Resolution, Report, ReportMedia, ConfigSetting, AuditLog,
+    BBMPWard, BBMPWardDataset
 )
 from backend.app.core.config import settings
 
@@ -94,18 +95,53 @@ def seed():
     if os.path.exists(geojson_path):
         with open(geojson_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            for feat in data.get("features", []):
+            meta = data.get("metadata", {})
+            features = data.get("features", [])
+
+            # Active dataset record
+            if not db.query(BBMPWardDataset).filter(BBMPWardDataset.is_active == True).first():
+                ds_rec = BBMPWardDataset(
+                    source_name=meta.get("source_name", "BBMP Ward Map - 198 Wards"),
+                    source_organization=meta.get("source_organization", "Bruhat Bengaluru Mahanagara Palike (BBMP) GIS Cell / Government of Karnataka"),
+                    source_url=meta.get("source_url", "https://data.opencity.in/dataset/bbmp-ward-information"),
+                    dataset_version=meta.get("dataset_version", "BBMP-198-2015-V1"),
+                    dataset_date=meta.get("dataset_date", "2015-10-01"),
+                    download_date=meta.get("download_date", "2026-09-08"),
+                    coordinate_system=meta.get("coordinate_system", "EPSG:4326 (WGS84)"),
+                    ward_count=len(features),
+                    valid_wards=len(features),
+                    invalid_wards=0,
+                    license_info=meta.get("license", "Open Government Data (OGD) Karnataka / Public Record"),
+                    is_active=True
+                )
+                db.add(ds_rec)
+
+            for feat in features:
                 p = feat["properties"]
                 geom_str = json.dumps(feat["geometry"])
                 w = Ward(
                     ward_number=p["ward_number"],
                     ward_name=p["ward_name"],
-                    zone_name=p["zone_name"],
+                    zone_name=p.get("zone_name") or "Bengaluru",
                     boundary_geojson=geom_str
                 )
                 db.add(w)
                 db.flush()
                 wards_map[p["ward_number"]] = w
+
+                bw = BBMPWard(
+                    ward_number=p["ward_number"],
+                    ward_name=p["ward_name"],
+                    zone_name=p.get("zone_name") or "Bengaluru",
+                    assembly_constituency=p.get("assembly_constituency"),
+                    parliament_constituency=p.get("parliament_constituency"),
+                    geometry=geom_str,
+                    source=meta.get("source_name", "BBMP Ward Map - 198 Wards"),
+                    source_url=meta.get("source_url", "https://data.opencity.in/dataset/bbmp-ward-information"),
+                    dataset_version=meta.get("dataset_version", "BBMP-198-2015-V1"),
+                    dataset_date=meta.get("dataset_date", "2015-10-01")
+                )
+                db.add(bw)
 
     # 3. Users (Admin, Officers, Citizens)
     admin_user = User(

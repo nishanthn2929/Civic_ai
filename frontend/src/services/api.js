@@ -86,6 +86,10 @@ export const citizenService = {
     const res = await api.post('/drive/process-frame', payload);
     return res.data;
   },
+  getWardSourceInfo: async () => {
+    const res = await api.get('/reports/ward-source-info');
+    return res.data;
+  },
   verifyResolution: async (incidentId, verified, feedback) => {
     const res = await api.post(`/incidents/${incidentId}/citizen-verify`, {
       verified,
@@ -169,6 +173,38 @@ export const adminService = {
   getHandoffPackage: async (incidentId) => {
     const res = await api.get(`/admin/government-handoff/${incidentId}`);
     return res.data;
+  },
+  getWardDatasetInfo: async () => {
+    const res = await api.get('/admin/wards/dataset-info');
+    return res.data;
+  },
+  getWardGeoJson: async () => {
+    const res = await api.get('/admin/wards/geojson');
+    return res.data;
+  },
+  searchWards: async (q) => {
+    const res = await api.get('/admin/wards/search', { params: { q } });
+    return res.data?.results || [];
+  },
+  detectWard: async (lat, lon) => {
+    const res = await api.post('/admin/wards/detect', { latitude: lat, longitude: lon });
+    return res.data;
+  },
+  validateWardDataset: async (formData) => {
+    const res = await api.post('/admin/wards/validate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return res.data;
+  },
+  importWardDataset: async (formData) => {
+    const res = await api.post('/admin/wards/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return res.data;
+  },
+  getWardBackups: async () => {
+    const res = await api.get('/admin/wards/backups');
+    return res.data?.backups || [];
   }
 };
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Sliders, Users, FileText, Shield, Save, Copy, Check, ExternalLink, RefreshCw } from 'lucide-react';
+import { Settings, Sliders, Users, FileText, Shield, Save, Copy, Check, ExternalLink, RefreshCw, Map } from 'lucide-react';
 import { adminService, authorityService } from '../../services/api';
+import BbmpWardManager from './BbmpWardManager';
 
 export default function AdminConfigPage() {
   const [activeSubTab, setActiveSubTab] = useState('thresholds');
@@ -152,6 +153,17 @@ export default function AdminConfigPage() {
         >
           <FileText className="w-4 h-4" />
           <span>BBMP Handoff Dossier</span>
+        </button>
+        <button
+          onClick={() => setActiveSubTab('wards')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+            activeSubTab === 'wards'
+              ? 'bg-emerald-600 text-white'
+              : 'text-slate-400 hover:bg-slate-800'
+          }`}
+        >
+          <Map className="w-4 h-4 text-emerald-300" />
+          <span>BBMP Ward Data</span>
         </button>
       </div>
 
@@ -370,6 +382,10 @@ export default function AdminConfigPage() {
           )}
         </div>
       )}
+
+      {/* Tab 5: Authoritative BBMP Ward Data Management (Requirement 10 & 8) */}
+      {activeSubTab === 'wards' && <BbmpWardManager />}
     </div>
   );
 }
+

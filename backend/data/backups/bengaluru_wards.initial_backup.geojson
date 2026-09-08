@@ -1,0 +1,216 @@
+{
+  "type": "FeatureCollection",
+  "name": "bengaluru_bbmp_wards",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 151,
+        "ward_name": "Koramangala",
+        "zone_name": "South",
+        "pincode": 560034
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.610, 12.925],
+            [77.640, 12.925],
+            [77.642, 12.945],
+            [77.612, 12.945],
+            [77.610, 12.925]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 174,
+        "ward_name": "HSR Layout",
+        "zone_name": "Bommanahalli",
+        "pincode": 560102
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.630, 12.900],
+            [77.665, 12.900],
+            [77.665, 12.924],
+            [77.630, 12.924],
+            [77.630, 12.900]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 112,
+        "ward_name": "Indiranagar / Domlur",
+        "zone_name": "East",
+        "pincode": 560038
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.625, 12.955],
+            [77.660, 12.955],
+            [77.660, 12.985],
+            [77.625, 12.985],
+            [77.625, 12.955]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 85,
+        "ward_name": "Whitefield / Kadugodi",
+        "zone_name": "Mahadevapura",
+        "pincode": 560066
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.720, 12.950],
+            [77.780, 12.950],
+            [77.780, 13.000],
+            [77.720, 13.000],
+            [77.720, 12.950]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 150,
+        "ward_name": "Bellandur",
+        "zone_name": "Mahadevapura",
+        "pincode": 560103
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.660, 12.915],
+            [77.710, 12.915],
+            [77.710, 12.950],
+            [77.660, 12.950],
+            [77.660, 12.915]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 176,
+        "ward_name": "BTM Layout",
+        "zone_name": "South",
+        "pincode": 560068
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.595, 12.905],
+            [77.625, 12.905],
+            [77.625, 12.925],
+            [77.595, 12.925],
+            [77.595, 12.905]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 144,
+        "ward_name": "Jayanagar",
+        "zone_name": "South",
+        "pincode": 560011
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.570, 12.915],
+            [77.595, 12.915],
+            [77.595, 12.945],
+            [77.570, 12.945],
+            [77.570, 12.915]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 45,
+        "ward_name": "Malleshwaram",
+        "zone_name": "West",
+        "pincode": 560003
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.555, 12.985],
+            [77.585, 12.985],
+            [77.585, 13.020],
+            [77.555, 13.020],
+            [77.555, 12.985]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 4,
+        "ward_name": "Yelahanka Satellite Town",
+        "zone_name": "Yelahanka",
+        "pincode": 560064
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.580, 13.080],
+            [77.625, 13.080],
+            [77.625, 13.125],
+            [77.580, 13.125],
+            [77.580, 13.080]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "ward_number": 160,
+        "ward_name": "Rajarajeshwari Nagar",
+        "zone_name": "Rajarajeshwari Nagar",
+        "pincode": 560098
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.510, 12.910],
+            [77.545, 12.910],
+            [77.545, 12.950],
+            [77.510, 12.950],
+            [77.510, 12.910]
+          ]
+        ]
+      }
+    }
+  ]
+}

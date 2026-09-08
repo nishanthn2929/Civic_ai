@@ -314,6 +314,77 @@ def test_suite():
         assert "Mysuru" in data["ward_name"] or "Mysuru" in data["formatted_address"]
     run_test("Non-Bengaluru Coordinates Accurately Flagged with Regional Identity", test_outside_bengaluru_geotag_resolution)
 
+    print("\n--- 10. Authoritative BBMP Ward Boundary & Point-in-Polygon Tests (Requirement 12) ---")
+    def test_multi_location_point_in_polygon():
+        # Test locations inside Bengaluru and outside
+        test_cases = [
+            ("Koramangala 4th Block", 12.9352, 77.6245, 151, "Koramangala"),
+            ("HSR Layout Sector 1", 12.9120, 77.6450, 174, "HSR Layout"),
+            ("Domlur / Indiranagar", 12.9609, 77.6387, 112, "Domlur"),
+            ("Malleshwaram", 13.0031, 77.5643, 65, "Kadu Malleshwar Ward"),
+            ("Jayanagar 4th Block", 12.9308, 77.5838, 168, "Pattabhiram Nagar"),
+            ("Whitefield Corridor", 12.9700, 77.7500, 84, "Hagadur / Whitefield")
+        ]
+        for name, lat, lon, exp_num, exp_name in test_cases:
+            loc = gis_service.resolve_location(lat, lon)
+            assert loc["is_within_bengaluru"] is True, f"Failed within_bengaluru for {name}"
+            assert loc["ward_number"] == exp_num, f"Expected ward #{exp_num} for {name}, got {loc['ward_number']}"
+            assert exp_name in loc["ward_name"], f"Expected {exp_name} in ward name for {name}, got {loc['ward_name']}"
+            assert loc["detection_method"] == "EXACT_POINT_IN_POLYGON"
+            assert loc["is_estimated"] is False
+    run_test("Multi-Location Bengaluru GPS Point-in-Polygon Exact Ward Matching", test_multi_location_point_in_polygon)
+
+    def test_strict_rule9_do_not_guess_outside_bbmp():
+        # Outside coordinates (Mysuru, Tumakuru, Delhi)
+        outside_coords = [
+            ("Mysuru", 12.2958, 76.6394),
+            ("Delhi", 28.6139, 77.2090)
+        ]
+        for city, lat, lon in outside_coords:
+            loc = gis_service.resolve_location(lat, lon, allow_estimated_fallback=False)
+            assert loc["is_within_bengaluru"] is False, f"Erroneously flagged {city} as within Bengaluru"
+            assert loc["ward_number"] is None, f"Assigned ward number to outside location {city}"
+            assert loc["ward_name"] == "BBMP ward could not be determined.", f"Failed Rule 9 exact phrasing: {loc['ward_name']}"
+            assert loc["is_estimated"] is False
+    run_test("Strict Rule 9: No Guessing Outside BBMP (BBMP ward could not be determined)", test_strict_rule9_do_not_guess_outside_bbmp)
+
+    def test_authoritative_dataset_validation():
+        from backend.app.services.ward_importer import ward_importer
+        with open("backend/data/bengaluru_wards.geojson", "r", encoding="utf-8") as f:
+            content = f.read()
+        features, crs = ward_importer.parse_geojson(content)
+        report = ward_importer.validate_features(features, crs, "Official BBMP 198 Wards")
+        assert report["total_wards"] == 198, f"Expected 198 wards, got {report['total_wards']}"
+        assert report["valid_geometries"] == 198, f"Expected 198 valid geometries, got {report['valid_geometries']}"
+        assert report["invalid_geometries"] == 0, f"Found invalid geometries: {report['invalid_geometries']}"
+        assert report["missing_ward_numbers"] == 0, f"Found missing ward numbers: {report['missing_ward_numbers']}"
+        assert len(report["duplicate_ward_numbers"]) == 0, f"Found duplicate ward numbers: {report['duplicate_ward_numbers']}"
+        assert report["is_geographically_reasonable"] is True, "Wards outside reasonable Bengaluru bounding box"
+        assert report["is_valid"] is True, "Validation failed"
+        assert "VALIDATION REPORT" in report["validation_report"]
+    run_test("Dataset Topology & Attribute Validation (198/198 Valid, EPSG:4326)", test_authoritative_dataset_validation)
+
+    def test_ward_source_transparency_api():
+        res = client.get("/api/reports/ward-source-info")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["title"] == "BBMP Ward Boundaries — Official Government Source"
+        assert "BBMP" in data["source_organization"]
+        assert "4326" in data["coordinate_system"]
+        assert "opencity.in" in data["source_url"] or "bbmp.gov.in" in data["source_url"]
+        assert data["ward_count"] == 198
+    run_test("Official Government Source Transparency API Verification", test_ward_source_transparency_api)
+
+    def test_admin_ward_detect_and_highlight():
+        res = client.post("/api/admin/wards/detect", json={"latitude": 12.9352, "longitude": 77.6245})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ward_number"] == 151
+        assert "Koramangala" in data["ward_name"]
+        assert data["geometry"] is not None
+        assert data["geometry"]["type"] in ["Polygon", "MultiPolygon"]
+    run_test("Admin GPS Point-in-Polygon Detect API with Boundary Highlight Geometry", test_admin_ward_detect_and_highlight)
+
     print("\n========================================================================")
     print(f"RESULTS: {passed} PASSED, {failed} FAILED")
     print("========================================================================\n")

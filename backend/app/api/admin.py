@@ -1,10 +1,10 @@
 import json
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.models.models import (
-    User, ConfigSetting, AuditLog, Incident, Ward, Department
+    User, ConfigSetting, AuditLog, Incident, Ward, Department, BBMPWard, BBMPWardDataset
 )
 from backend.app.schemas.schemas import (
     ConfigSettingUpdate, ConfigSettingOut, AuditLogOut, UserOut
@@ -12,7 +12,10 @@ from backend.app.schemas.schemas import (
 from backend.app.api.deps import require_role
 from backend.app.services.government_adapter import govt_adapter
 from backend.app.services.duplicate_engine import duplicate_engine
+from backend.app.services.gis_service import gis_service
+from backend.app.services.ward_importer import ward_importer, WardValidationException
 from backend.app.core.config import settings
+
 
 router = APIRouter(prefix="/admin", tags=["Administrator Controls"])
 
@@ -152,3 +155,195 @@ def get_government_handoff_package(
     else:
         # Fallback to Citizen-Assisted Handoff Package
         return govt_adapter.generate_citizen_handoff_package(incident)
+
+# =========================================================================
+# BBMP AUTHORITATIVE WARD DATA MANAGEMENT (Requirements 8 & 10)
+# =========================================================================
+
+@router.get("/wards/dataset-info")
+def get_ward_dataset_info(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """Retrieve active BBMP ward dataset metadata, version, and validation statistics."""
+    ds = db.query(BBMPWardDataset).filter(BBMPWardDataset.is_active == True).first()
+    meta = gis_service.get_dataset_metadata()
+    total_in_db = db.query(BBMPWard).count()
+
+    return {
+        "dataset_source": ds.source_name if ds else meta.get("source_name", "BBMP Ward Map - 198 Wards"),
+        "source_organization": ds.source_organization if ds else meta.get("source_organization", "BBMP GIS Cell / Govt of Karnataka"),
+        "source_url": ds.source_url if ds else meta.get("source_url", "https://data.opencity.in/dataset/bbmp-ward-information"),
+        "dataset_version": ds.dataset_version if ds else meta.get("dataset_version", "BBMP-198-2015-V1"),
+        "dataset_date": ds.dataset_date if ds else meta.get("dataset_date", "2015-10-01"),
+        "download_date": ds.download_date if ds else meta.get("download_date", "2026-09-08"),
+        "last_imported": ds.created_at.isoformat() if ds and ds.created_at else None,
+        "coordinate_system": ds.coordinate_system if ds else meta.get("coordinate_system", "EPSG:4326 (WGS84)"),
+        "total_wards": ds.ward_count if ds else (total_in_db or len(gis_service.wards_data)),
+        "valid_wards": ds.valid_wards if ds else (total_in_db or len(gis_service.wards_data)),
+        "invalid_wards": ds.invalid_wards if ds else 0,
+        "license_info": ds.license_info if ds else meta.get("license", "Open Government Data (OGD) Karnataka / Public Record"),
+        "source_transparency_badge": "BBMP Ward Boundaries — Official Government Source"
+    }
+
+@router.get("/wards/geojson")
+def get_all_wards_geojson():
+    """Export complete authoritative GeoJSON FeatureCollection of all BBMP wards."""
+    return gis_service.get_all_wards_geojson()
+
+@router.get("/wards/search")
+def search_wards(
+    q: str = Query(..., min_length=1, description="Ward number or name"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """Search wards by number or partial name and return matched boundary geometries."""
+    results = []
+    q_str = q.strip().lower()
+    for feat in gis_service.wards_data:
+        p = feat["properties"]
+        wnum = str(p.get("ward_number", ""))
+        wname = str(p.get("ward_name", "")).lower()
+        zone = str(p.get("zone_name", "")).lower()
+        if q_str in wnum or q_str in wname or q_str in zone:
+            results.append({
+                "ward_number": p.get("ward_number"),
+                "ward_name": p.get("ward_name"),
+                "zone_name": p.get("zone_name"),
+                "assembly_constituency": p.get("assembly_constituency"),
+                "parliament_constituency": p.get("parliament_constituency"),
+                "geometry": feat.get("geometry")
+            })
+            if len(results) >= 25:
+                break
+    return {"query": q, "count": len(results), "results": results}
+
+@router.post("/wards/detect")
+def detect_ward_by_coordinates(
+    payload: Dict[str, float]
+):
+    """Point-in-Polygon test for arbitrary GPS coordinates with boundary highlight geometry."""
+    lat = payload.get("latitude")
+    lon = payload.get("longitude")
+    if lat is None or lon is None:
+        raise HTTPException(status_code=400, detail="Latitude and Longitude are required.")
+
+    loc = gis_service.resolve_location(lat, lon)
+    highlight_geom = None
+    if loc.get("is_within_bengaluru") and loc.get("ward_number"):
+        for feat in gis_service.wards_data:
+            if feat["properties"].get("ward_number") == loc["ward_number"]:
+                highlight_geom = feat.get("geometry")
+                break
+
+    return {
+        "latitude": lat,
+        "longitude": lon,
+        "is_within_bengaluru": loc["is_within_bengaluru"],
+        "ward_number": loc["ward_number"],
+        "ward_name": loc["ward_name"],
+        "zone_name": loc["zone_name"],
+        "formatted_address": loc.get("formatted_address"),
+        "detection_method": loc.get("detection_method"),
+        "source_verification": loc.get("source_verification"),
+        "geometry": highlight_geom
+    }
+
+@router.post("/wards/validate")
+async def validate_uploaded_dataset(
+    file: UploadFile = File(...),
+    source_name: str = Form("Uploaded Ward Dataset"),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """Validate uploaded dataset file without importing (Requirement 5)."""
+    filename = file.filename.lower()
+    content = await file.read()
+
+    try:
+        if filename.endswith(".zip"):
+            features, crs = ward_importer.parse_shapefile_zip(content)
+        elif filename.endswith(".kml") or filename.endswith(".kmz"):
+            features, crs = ward_importer.parse_kml(content)
+        elif filename.endswith(".geojson") or filename.endswith(".json"):
+            features, crs = ward_importer.parse_geojson(content)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported format. Please upload GeoJSON (.geojson, .json), KML (.kml, .kmz), or ESRI Shapefile Zip (.zip)."
+            )
+
+        report = ward_importer.validate_features(features, crs, source_name)
+        return report
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation failed: {str(e)}")
+
+@router.post("/wards/import")
+async def import_or_replace_dataset(
+    file: UploadFile = File(...),
+    source_name: str = Form(...),
+    source_organization: str = Form("Government of Karnataka / BBMP"),
+    source_url: str = Form("https://bbmp.gov.in"),
+    dataset_version: str = Form("BBMP-CUSTOM-V1"),
+    dataset_date: str = Form("2026-09-08"),
+    license_info: str = Form("Open Government Data (OGD) Karnataka / Public Record"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """Safely validate, backup, and replace the BBMP ward dataset (Requirement 10)."""
+    filename = file.filename.lower()
+    content = await file.read()
+
+    try:
+        if filename.endswith(".zip"):
+            features, crs = ward_importer.parse_shapefile_zip(content)
+        elif filename.endswith(".kml") or filename.endswith(".kmz"):
+            features, crs = ward_importer.parse_kml(content)
+        elif filename.endswith(".geojson") or filename.endswith(".json"):
+            features, crs = ward_importer.parse_geojson(content)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported format.")
+
+        metadata = {
+            "source_name": source_name,
+            "source_organization": source_organization,
+            "source_url": source_url,
+            "dataset_version": dataset_version,
+            "dataset_date": dataset_date,
+            "download_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "coordinate_system": crs,
+            "license": license_info
+        }
+
+        result = ward_importer.import_dataset(features, metadata, db)
+
+        db.add(AuditLog(
+            user_id=current_user.id,
+            action="BBMP_WARD_DATASET_REPLACED",
+            entity_type="ward_dataset",
+            details_json=json.dumps({
+                "version": dataset_version,
+                "source": source_name,
+                "ward_count": result["ward_count"],
+                "backup": result["backup_file"]
+            })
+        ))
+        db.commit()
+
+        return result
+
+    except WardValidationException as wve:
+        raise HTTPException(status_code=422, detail={
+            "error": str(wve),
+            "validation_report": wve.report
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
+
+@router.get("/wards/backups")
+def list_dataset_backups(
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """List historical preserved ward boundary backups."""
+    return {"backups": ward_importer.list_backups()}
+

@@ -12,6 +12,8 @@ WARDS_GEOJSON_PATH = Path(settings.DATA_DIR) / "bengaluru_wards.geojson"
 class BengaluruGISService:
     def __init__(self):
         self.wards_data: List[Dict[str, Any]] = []
+        self.parsed_wards: List[Dict[str, Any]] = []
+        self.metadata: Dict[str, Any] = {}
         self._osm_cache: Dict[str, Any] = {}
         self._search_cache: Dict[str, Any] = {}
         self._load_geojson()
@@ -19,9 +21,41 @@ class BengaluruGISService:
     def _load_geojson(self):
         if not WARDS_GEOJSON_PATH.exists():
             return
-        with open(WARDS_GEOJSON_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            self.wards_data = data.get("features", [])
+        try:
+            with open(WARDS_GEOJSON_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.metadata = data.get("metadata", {
+                    "source_name": "BBMP Ward Map - 198 Wards",
+                    "source_organization": "Bruhat Bengaluru Mahanagara Palike (BBMP) GIS Cell / Government of Karnataka",
+                    "source_url": "https://data.opencity.in/dataset/bbmp-ward-information",
+                    "dataset_version": "BBMP-198-2015-V1",
+                    "dataset_date": "2015-10-01",
+                    "coordinate_system": "EPSG:4326 (WGS84)",
+                    "ward_count": len(data.get("features", [])),
+                    "license": "Open Government Data (OGD) Karnataka / Public Record"
+                })
+                self.wards_data = data.get("features", [])
+                self.parsed_wards = []
+                for feat in self.wards_data:
+                    try:
+                        geom = shape(feat["geometry"])
+                        self.parsed_wards.append({
+                            "properties": feat["properties"],
+                            "geometry": geom,
+                            "bounds": geom.bounds
+                        })
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[GIS Service] Error reading wards GeoJSON: {e}")
+
+    def reload_wards(self):
+        """Reload all BBMP ward geometries and metadata into memory."""
+        self._load_geojson()
+
+    def get_dataset_metadata(self) -> Dict[str, Any]:
+        """Return official data-source record for source transparency (Requirement 2 & 11)."""
+        return self.metadata
 
     @staticmethod
     def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -82,7 +116,6 @@ class BengaluruGISService:
                 data = json.loads(resp.read().decode("utf-8"))
                 addr = data.get("address", {})
                 
-                # Extract exact road or feature name
                 road = addr.get("road") or addr.get("pedestrian") or addr.get("street") or addr.get("amenity") or addr.get("building") or ""
                 house_num = addr.get("house_number", "")
                 neighbourhood = addr.get("neighbourhood") or addr.get("suburb") or addr.get("residential") or addr.get("quarter") or ""
@@ -149,7 +182,7 @@ class BengaluruGISService:
                     ward_meta = self.resolve_location(lat, lon, fetch_osm=False)
 
                     # Build clean title
-                    display_parts = [p for p in [road, suburb, ward_meta.get("ward_name")] if p]
+                    display_parts = [p for p in [road, suburb, ward_meta.get("ward_name")] if p and p != "BBMP ward could not be determined."]
                     title = ", ".join(display_parts) if display_parts else item.get("display_name", "")
 
                     results.append({
@@ -171,26 +204,36 @@ class BengaluruGISService:
         except Exception:
             return []
 
-    def resolve_location(self, lat: float, lon: float, fetch_osm: bool = True) -> Dict[str, Any]:
+    def resolve_location(
+        self,
+        lat: float,
+        lon: float,
+        fetch_osm: bool = True,
+        allow_estimated_fallback: bool = False
+    ) -> Dict[str, Any]:
         """
-        Identify whether coordinates fall inside Bengaluru BBMP or an outside region.
-        Enriches with exact street address via OpenStreetMap Nominatim when available.
-        Returns ward, zone, region name, exact road, and formatted address.
+        Determine BBMP ward for given GPS coordinates using exact Point-in-Polygon (Requirement 7 & 9).
+        If inside an authoritative BBMP ward polygon, returns official ward number and name.
+        If outside all ward polygons:
+            Returns: 'BBMP ward could not be determined.'
+            Never guesses or presents an estimated ward as an exact ward.
         """
-        # Optional live OSM reverse-geocoding for exact road & landmark
         osm_info = self.fetch_osm_reverse(lat, lon) if fetch_osm else None
 
-        # 1. Exact Point-in-Polygon check against authentic BBMP wards
-        pt = Point(lon, lat)  # GeoJSON is [lng, lat]
-        for feature in self.wards_data:
-            geom = shape(feature["geometry"])
+        # 1. Exact Point-in-Polygon check against authentic BBMP wards (Requirement 7)
+        pt = Point(lon, lat)  # WGS84: (lon, lat)
+        for item in self.parsed_wards:
+            b = item["bounds"]
+            if not (b[0] <= lon <= b[2] and b[1] <= lat <= b[3]):
+                continue
+            geom = item["geometry"]
             if geom.contains(pt) or geom.touches(pt):
-                props = feature["properties"]
-                base_addr = f"{props['ward_name']}, {props['zone_name']} Zone, Bengaluru"
+                props = item["properties"]
+                base_addr = f"{props['ward_name']}, {props.get('zone_name', 'Bengaluru')} Zone, Bengaluru"
                 if osm_info and osm_info.get("road"):
                     road_part = f"#{osm_info['house_number']} {osm_info['road']}".strip() if osm_info.get("house_number") else osm_info["road"]
                     parts = [p for p in [road_part, osm_info.get("neighbourhood"), props["ward_name"]] if p]
-                    base_addr = f"{', '.join(parts)}, {props['zone_name']} Zone, Bengaluru"
+                    base_addr = f"{', '.join(parts)}, {props.get('zone_name', 'Bengaluru')} Zone, Bengaluru"
                     if osm_info.get("postcode"):
                         base_addr += f" - {osm_info['postcode']}"
                 elif props.get("pincode"):
@@ -200,87 +243,22 @@ class BengaluruGISService:
                     "is_within_bengaluru": True,
                     "ward_number": props["ward_number"],
                     "ward_name": props["ward_name"],
-                    "zone_name": props["zone_name"],
+                    "zone_name": props.get("zone_name") or "Bengaluru",
                     "pincode": osm_info.get("postcode") if osm_info and osm_info.get("postcode") else props.get("pincode"),
+                    "assembly_constituency": props.get("assembly_constituency"),
+                    "parliament_constituency": props.get("parliament_constituency"),
                     "region_name": "Bengaluru Urban",
                     "exact_road": osm_info.get("road") if osm_info else None,
                     "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
                     "display_name": osm_info.get("display_name") if osm_info else None,
                     "formatted_address": base_addr,
-                    "approximate": False
+                    "detection_method": "EXACT_POINT_IN_POLYGON",
+                    "is_estimated": False,
+                    "approximate": False,
+                    "source_verification": "Official Government Source (BBMP GIS Cell)"
                 }
 
-        # 2. Check if within Greater Bengaluru Metropolitan Area
-        is_blr_geo = False
-        if osm_info:
-            osm_state = osm_info.get("state") or ""
-            district_str = f"{osm_info.get('state_district', '')} {osm_info.get('county', '')} {osm_info.get('city', '')} {osm_info.get('town', '')}".lower()
-            blr_regions = [
-                "bengaluru", "bangalore", "kanakapura", "ramanagara", "anekal", 
-                "magadi", "channapatna", "bidadi", "hoskote", "nelamangala", 
-                "devanahalli", "doddaballapura"
-            ]
-            if osm_state == "Karnataka" and any(k in district_str for k in blr_regions):
-                is_blr_geo = True
-            elif osm_state == "Karnataka" and (self.BLR_BOUNDS["min_lat"] <= lat <= self.BLR_BOUNDS["max_lat"] and self.BLR_BOUNDS["min_lon"] <= lon <= self.BLR_BOUNDS["max_lon"]):
-                is_blr_geo = True
-        else:
-            is_blr_geo = (
-                self.BLR_BOUNDS["min_lat"] <= lat <= self.BLR_BOUNDS["max_lat"]
-                and self.BLR_BOUNDS["min_lon"] <= lon <= self.BLR_BOUNDS["max_lon"]
-            )
-
-        if is_blr_geo and self.wards_data:
-            # Find nearest BBMP ward centroid
-            nearest_ward = None
-            min_dist = float("inf")
-            for feature in self.wards_data:
-                geom = shape(feature["geometry"])
-                centroid = geom.centroid
-                dist = self.haversine_distance_meters(lat, lon, centroid.y, centroid.x)
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest_ward = feature["properties"]
-
-            if nearest_ward:
-                if osm_info and osm_info.get("road"):
-                    road_part = f"#{osm_info['house_number']} {osm_info['road']}".strip() if osm_info.get("house_number") else osm_info["road"]
-                    locality = osm_info.get("neighbourhood") or osm_info.get("town") or osm_info.get("city") or nearest_ward["ward_name"]
-                    parts = [p for p in [road_part, locality, nearest_ward["ward_name"]] if p]
-                    base_addr = f"{', '.join(parts)}, {nearest_ward['zone_name']} Zone, Bengaluru"
-                    if osm_info.get("postcode"):
-                        base_addr += f" - {osm_info['postcode']}"
-                elif osm_info and (osm_info.get("town") or osm_info.get("city")):
-                    locality = osm_info.get("town") or osm_info.get("city")
-                    district_name = osm_info.get("state_district") or nearest_ward["ward_name"]
-                    base_addr = f"{locality}, {district_name}, Karnataka"
-                    if osm_info.get("postcode"):
-                        base_addr += f" - {osm_info['postcode']}"
-                else:
-                    base_addr = f"{nearest_ward['ward_name']}, {nearest_ward['zone_name']} Zone, Bengaluru"
-                    if nearest_ward.get("pincode"):
-                        base_addr += f" - {nearest_ward['pincode']}"
-
-                town_name = osm_info.get("town") or osm_info.get("city") if osm_info else None
-                ward_display = f"{town_name} ({nearest_ward['ward_name']})" if town_name and town_name.lower() not in nearest_ward["ward_name"].lower() else nearest_ward["ward_name"]
-                region_display = f"{town_name}, Karnataka" if town_name else "Bengaluru Metropolitan"
-
-                return {
-                    "is_within_bengaluru": True,
-                    "ward_number": nearest_ward["ward_number"],
-                    "ward_name": ward_display,
-                    "zone_name": nearest_ward["zone_name"],
-                    "pincode": osm_info.get("postcode") if osm_info and osm_info.get("postcode") else nearest_ward.get("pincode"),
-                    "region_name": region_display,
-                    "state": osm_info.get("state") if osm_info else "Karnataka",
-                    "exact_road": osm_info.get("road") if osm_info else None,
-                    "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
-                    "display_name": osm_info.get("display_name") if osm_info else None,
-                    "formatted_address": base_addr,
-                    "approximate": True
-                }
-
-        # 3. Location is OUTSIDE Bengaluru BBMP: Identify true external region
+        # 2. Point is OUTSIDE EVERY BBMP WARD POLYGON (Rule 9: Do Not Guess)
         if osm_info and (osm_info.get("city") or osm_info.get("state") or osm_info.get("state_district")):
             loc_label = osm_info.get("town") or osm_info.get("city") or osm_info.get("county") or osm_info.get("state_district") or "Outside Area"
             state_label = osm_info.get("state") or "Other State"
@@ -293,7 +271,6 @@ class BengaluruGISService:
                 if dist < min_reg_dist:
                     min_reg_dist = dist
                     nearest_region = reg["name"]
-
             region_display = f"{nearest_region}" if min_reg_dist <= 250000 else "Outside BBMP Jurisdiction"
 
         if osm_info and osm_info.get("display_name"):
@@ -306,10 +283,25 @@ class BengaluruGISService:
         else:
             out_addr = f"{region_display} ({lat:.4f}° N, {lon:.4f}° E)"
 
+        # Handle explicit fallback configuration if allowed (Rule 9)
+        estimated_ward = None
+        if allow_estimated_fallback and self.parsed_wards:
+            nearest_item = min(
+                self.parsed_wards,
+                key=lambda item: self.haversine_distance_meters(lat, lon, item["geometry"].centroid.y, item["geometry"].centroid.x)
+            )
+            estimated_ward = {
+                "ward_number": nearest_item["properties"]["ward_number"],
+                "ward_name": f"{nearest_item['properties']['ward_name']} (Estimated Ward — not officially confirmed)",
+                "zone_name": nearest_item["properties"].get("zone_name"),
+                "status": "Estimated Ward — not officially confirmed"
+            }
+
         return {
             "is_within_bengaluru": False,
             "ward_number": None,
-            "ward_name": f"Outside BBMP ({region_display})",
+            "ward_name": "BBMP ward could not be determined.",
+            "official_ward_status": "BBMP ward could not be determined.",
             "zone_name": "Non-BBMP",
             "pincode": osm_info.get("postcode") if osm_info else None,
             "region_name": region_display,
@@ -318,7 +310,11 @@ class BengaluruGISService:
             "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
             "display_name": osm_info.get("display_name") if osm_info else None,
             "formatted_address": out_addr,
-            "approximate": True
+            "detection_method": "OUTSIDE_BBMP_BOUNDARY",
+            "is_estimated": False,
+            "estimated_ward": estimated_ward,
+            "approximate": True,
+            "source_verification": "Official Government Source (BBMP GIS Cell)"
         }
 
     def find_ward_by_coordinates(self, lat: float, lon: float) -> Optional[Dict[str, Any]]:
@@ -326,6 +322,7 @@ class BengaluruGISService:
         return self.resolve_location(lat, lon)
 
     def get_all_wards_geojson(self) -> Dict[str, Any]:
+        """Return the authoritative GeoJSON FeatureCollection of all BBMP wards."""
         if WARDS_GEOJSON_PATH.exists():
             with open(WARDS_GEOJSON_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
