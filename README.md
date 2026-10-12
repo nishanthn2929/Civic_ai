@@ -68,9 +68,9 @@ python run_tests.py
 
 - **Evaluate Model:**
   ```bash
-  python ml_pipeline/evaluate.py --weights yolov8n.pt --data ml_pipeline/sample_dataset/data.yaml
+  python ml_pipeline/evaluate.py --weights ml_pipeline/weights/rtdetr_pothole_best.pt --data ml_pipeline/coco_dataset/data.yaml
   ```
 - **Train Custom Pothole Model:**
   ```bash
-  python ml_pipeline/train.py --data ml_pipeline/sample_dataset/data.yaml --epochs 3 --batch 2
+  python ml_pipeline/train.py --data ml_pipeline/coco_dataset/data.yaml --weights rtdetr-l.pt --epochs 12 --batch 2 --name pothole_rtdetr_run
   ```

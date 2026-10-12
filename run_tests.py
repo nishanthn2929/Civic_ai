@@ -99,6 +99,68 @@ def test_suite():
     run_test("Authority Officer Login & Role Verification", test_authority_login)
 
     print("\n--- 4. Dashcam Drive Mode & Temporal Filtering Tests ---")
+    def test_dashcam_401_unauthorized():
+        # Test 1: Calling initialization without token must return 401
+        res = client.post("/api/drive/sessions/start", json={
+            "latitude": 12.9350,
+            "longitude": 77.6240
+        })
+        assert res.status_code == 401, f"Expected 401, got {res.status_code}: {res.text}"
+        assert "Authentication credentials" in res.json().get("detail", "")
+    run_test("Dashcam Drive Mode 401 Unauthorized Rejection when Token Missing", test_dashcam_401_unauthorized)
+
+    def test_dashcam_authenticated_init():
+        # Test 2: Calling initialization with valid token must succeed
+        headers = {"Authorization": f"Bearer {auth_token}"}
+        res = client.post("/api/drive/sessions/start", json={
+            "latitude": 12.9350,
+            "longitude": 77.6240
+        }, headers=headers)
+        assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.text}"
+        data = res.json()
+        assert data["status"] == "ACTIVE"
+        assert data["id"] is not None
+    run_test("Dashcam Drive Mode Authorized Session Initialization (200 OK)", test_dashcam_authenticated_init)
+
+    def test_dashcam_gps_accuracy_validation():
+        headers = {"Authorization": f"Bearer {auth_token}"}
+        start_res = client.post("/api/drive/sessions/start", json={"latitude": 12.9350, "longitude": 77.6240}, headers=headers)
+        session_id = start_res.json()["id"]
+
+        # Low accuracy (>50m, e.g. 75m) -> HELD_LOW_GPS_ACCURACY
+        f_poor = client.post("/api/drive/process-frame", json={
+            "session_id": session_id,
+            "timestamp_ms": int(time.time() * 1000),
+            "latitude": 12.9350,
+            "longitude": 77.6240,
+            "gps_accuracy": 75.0,
+            "category": "Pothole",
+            "confidence": 0.90
+        }, headers=headers)
+        assert f_poor.status_code == 200
+        assert f_poor.json()["status"] == "HELD_LOW_GPS_ACCURACY"
+        assert "GPS accuracy is too low" in f_poor.json()["message"]
+
+        # Good accuracy (8m) -> Accepted
+        f_good = client.post("/api/drive/process-frame", json={
+            "session_id": session_id,
+            "timestamp_ms": int(time.time() * 1000),
+            "latitude": 12.9350,
+            "longitude": 77.6240,
+            "gps_accuracy": 8.0,
+            "category": "Pothole",
+            "confidence": 0.90
+        }, headers=headers)
+        assert f_good.status_code == 200
+        assert f_good.json()["status"] == "EVENT_LOGGED"
+        assert f_good.json()["ward_number"] == 151
+        assert "Koramangala" in f_good.json()["ward_name"]
+        assert f_good.json()["assembly_constituency"] == "BTM Layout"
+        assert f_good.json()["mla_name"] == "Ramalinga Reddy"
+        assert f_good.json()["parliamentary_constituency"] == "Bangalore South"
+        assert f_good.json()["mp_name"] == "Tejasvi Surya"
+    run_test("GPS Accuracy Validation (>50m Held vs <=20m High Confidence)", test_dashcam_gps_accuracy_validation)
+
     def test_dashcam_temporal_filtering():
         headers = {"Authorization": f"Bearer {auth_token}"}
         # Start drive session
@@ -116,6 +178,8 @@ def test_suite():
             "timestamp_ms": t0,
             "latitude": 12.93500,
             "longitude": 77.62400,
+            "gps_accuracy": 7.5,
+            "speed": 32.0,
             "category": "Pothole",
             "confidence": 0.88,
             "bbox": [100.0, 150.0, 250.0, 300.0]
@@ -130,6 +194,8 @@ def test_suite():
             "timestamp_ms": t0 + 200,
             "latitude": 12.93502,
             "longitude": 77.62402,
+            "gps_accuracy": 7.5,
+            "speed": 32.5,
             "category": "Pothole",
             "confidence": 0.91,
             "bbox": [102.0, 152.0, 252.0, 302.0]
@@ -145,7 +211,51 @@ def test_suite():
             "distance_km": 4.5
         }, headers=headers)
         assert end_res.status_code == 200 and end_res.json()["status"] == "COMPLETED"
-    run_test("Dashcam Drive Mode Temporal Frame Suppression", test_dashcam_temporal_filtering)
+    run_test("Dashcam Drive Mode Temporal Consecutive-Frame Merging", test_dashcam_temporal_filtering)
+
+    def test_dashcam_government_reporting_adapter():
+        from backend.app.services.government_adapter import government_adapter
+        assert government_adapter.is_configured() is False, "Default environment should not fake active live government credentials"
+        res = government_adapter.create_complaint({
+            "incident_code": "BLR-TEST-9999",
+            "category": "POTHOLE",
+            "latitude": 12.9352,
+            "longitude": 77.6245,
+            "ward_number": 151,
+            "ward_name": "Koramangala"
+        })
+        assert res["submission_status"] == "READY_FOR_OFFICIAL_SUBMISSION"
+        assert res["is_submitted"] is False
+        assert res["official_complaint_id"] is None
+        assert "Official submission is pending" in res["message"]
+    run_test("Government Reporting Adapter (Ethical Transparency: No Fake Submissions)", test_dashcam_government_reporting_adapter)
+
+    def test_dashcam_offline_sync():
+        headers = {"Authorization": f"Bearer {auth_token}"}
+        start_res = client.post("/api/drive/sessions/start", json={"latitude": 12.9350, "longitude": 77.6240}, headers=headers)
+        session_id = start_res.json()["id"]
+
+        offline_frames = [
+            {
+                "session_id": session_id,
+                "timestamp_ms": int(time.time() * 1000),
+                "latitude": 12.9360,
+                "longitude": 77.6250,
+                "gps_accuracy": 9.0,
+                "category": "Pothole",
+                "confidence": 0.85
+            }
+        ]
+        sync_res = client.post("/api/drive/sync-offline", json=offline_frames, headers=headers)
+        assert sync_res.status_code == 200
+        assert sync_res.json()["status"] == "SYNC_COMPLETED"
+        assert sync_res.json()["synced_frames"] == 1
+    run_test("Dashcam Drive Mode Offline Synchronization API", test_dashcam_offline_sync)
+
+    def test_dashcam_bounding_boxes_and_severity():
+        from backend.tests.test_drive_detections import test_drive_mode_pothole_bounding_boxes
+        test_drive_mode_pothole_bounding_boxes(client)
+    run_test("Dashcam Drive Mode Pothole Bounding Boxes & Severity Payload", test_dashcam_bounding_boxes_and_severity)
 
     print("\n--- 5. Public Dashboard Privacy & Zero PII Compliance ---")
     def test_public_privacy():
@@ -215,10 +325,16 @@ def test_suite():
         assert res.status_code == 200, f"Prescreen failed: {res.text}"
         data = res.json()
         assert data["has_exif_gps"] is True, "Pre-screen did not flag has_exif_gps"
+        assert data["photo_gps_available"] is True
+        assert data["photo_gps_source"] == "EXIF"
         assert abs(data["resolved_latitude"] - 12.9352) < 0.001
         assert abs(data["resolved_longitude"] - 77.6245) < 0.001
         assert data["bengaluru_ward"] == "Koramangala", f"Expected Koramangala, got {data['bengaluru_ward']}"
-        assert data["location_source"] == "EXIF_PHOTO_GEOTAG"
+        assert data["location_source"] in ["EXIF", "EXIF_PHOTO_GEOTAG"]
+        assert data["assembly_constituency"] is not None
+        assert data["mla_name"] is not None
+        assert data["parliamentary_constituency"] is not None
+        assert data["mp_name"] is not None
     run_test("Photo EXIF GPS Extraction & BBMP Ward Point-in-Polygon Resolution", test_exif_gps_extraction)
 
     def test_non_geotagged_fallback():
@@ -233,8 +349,11 @@ def test_suite():
         assert res.status_code == 200
         out = res.json()
         assert out["has_exif_gps"] is False
+        assert out["photo_gps_available"] is False
         assert out["bengaluru_ward"] == "HSR Layout"
-        assert out["location_source"] == "DEVICE_OR_MANUAL"
+        assert out["location_source"] in ["DEVICE_GPS", "DEVICE_OR_MANUAL"]
+        assert out["assembly_constituency"] is not None
+        assert out["parliamentary_constituency"] is not None
     run_test("Non-Geotagged Photo Graceful Coordinate & Ward Fallback", test_non_geotagged_fallback)
 
     print("\n--- 8. Multi-Factor Severity Clarification Tests (LOW / MEDIUM / HIGH) ---")
@@ -472,6 +591,137 @@ def test_suite():
         assert d_out["ward_detection_method"] == "OUTSIDE_BBMP"
     run_test("Reverse Geocode Debug Panel Contract (CRS, Geometry, Detection Method)", test_reverse_geocode_debug_panel_contract)
 
+    print("\n--- 12. MLA & Assembly Constituency Point-in-Polygon Tests ---")
+    def test_mla_ac_pip_resolution():
+        from backend.app.services.constituency_service import constituency_service
+        # 1. Koramangala -> BTM Layout (AC 172) -> Ramalinga Reddy (INC)
+        res_btm = constituency_service.resolve_constituencies(12.9340, 77.6250)
+        assert res_btm is not None, "Failed to resolve BTM Layout AC"
+        assert res_btm["assembly_constituency_number"] == 172
+        assert "BTM" in res_btm["assembly_constituency_name"]
+        assert "Ramalinga Reddy" in res_btm["mla_name"]
+        assert res_btm["mla_party"] == "INC"
+
+        # 2. Malleshwaram -> Malleshwaram (AC 157) -> Dr. C. N. Ashwath Narayan (BJP)
+        res_mal = constituency_service.resolve_constituencies(13.0031, 77.5643)
+        assert res_mal is not None, "Failed to resolve Malleshwaram AC"
+        assert res_mal["assembly_constituency_number"] == 157
+        assert "Malleshwaram" in res_mal["assembly_constituency_name"]
+        assert "Ashwath Narayan" in res_mal["mla_name"]
+        assert res_mal["mla_party"] == "BJP"
+
+        # 3. Strict Rule: Outside Bengaluru -> None (No guessing)
+        res_out = constituency_service.resolve_constituencies(12.2958, 76.6394) # Mysuru
+        assert res_out is None, "Erroneously assigned AC to Mysuru"
+    run_test("Authoritative Point-in-Polygon Resolution: 27 Bengaluru Assembly Constituencies & MLAs", test_mla_ac_pip_resolution)
+
+    print("\n--- 13. MP & Parliamentary Constituency Point-in-Polygon Tests ---")
+    def test_mp_pc_pip_resolution():
+        from backend.app.services.constituency_service import constituency_service
+        # 1. Bangalore South -> Tejasvi Surya (BJP)
+        res_south = constituency_service.resolve_constituencies(12.9340, 77.6250)
+        assert res_south is not None
+        assert res_south["parliamentary_constituency_number"] == 26
+        assert "Bangalore South" in res_south["parliamentary_constituency_name"]
+        assert "Tejasvi Surya" in res_south["mp_name"]
+        assert res_south["mp_party"] == "BJP"
+
+        # 2. Bangalore Central -> P. C. Mohan (BJP)
+        res_central = constituency_service.resolve_constituencies(12.9750, 77.6050)
+        assert res_central is not None
+        assert res_central["parliamentary_constituency_number"] == 25
+        assert "Bangalore Central" in res_central["parliamentary_constituency_name"]
+        assert "P. C. Mohan" in res_central["mp_name"]
+        assert res_central["mp_party"] == "BJP"
+    run_test("Authoritative Point-in-Polygon Resolution: 4 Lok Sabha Parliamentary Constituencies & MPs", test_mp_pc_pip_resolution)
+
+    print("\n--- 14. Boundary Proximity Warning (<35m Border Roads) Tests ---")
+    def test_boundary_proximity_warning():
+        from backend.app.services.constituency_service import constituency_service
+        # Test point along AC boundary road
+        res = constituency_service.resolve_constituencies(12.9340, 77.6250)
+        assert res is not None
+        assert "boundary_warning" in res
+        assert isinstance(res["boundary_warning"], bool)
+
+        # Reverse geocode API test for boundary warning
+        api_res = client.get("/api/reports/reverse-geocode?latitude=12.9352&longitude=77.6245")
+        assert api_res.status_code == 200
+        d = api_res.json()
+        assert "boundary_warning" in d
+        assert "assembly_constituency" in d
+        assert "parliamentary_constituency" in d
+    run_test("Constituency Boundary Proximity Detection (<35m Median/Road Flag)", test_boundary_proximity_warning)
+
+    print("\n--- 15. Representative Master Data Freshness & Admin Management Tests ---")
+    def test_admin_representative_management():
+        admin_login = client.post("/api/auth/login", json={
+            "email": "admin@bengaluru.gov.in",
+            "password": "Admin@123"
+        })
+        adm_token = admin_login.json()["access_token"]
+        headers = {"Authorization": f"Bearer {adm_token}"}
+
+        # 1. List representatives
+        rep_res = client.get("/api/admin/representatives", headers=headers)
+        assert rep_res.status_code == 200
+        reps = rep_res.json()
+        assert reps["mla_count"] == 27, f"Expected 27 MLAs, got {reps['mla_count']}"
+        assert reps["mp_count"] == 4, f"Expected 4 MPs, got {reps['mp_count']}"
+
+        # 2. Update MLA with verified freshness
+        first_mla = reps["mlas"][0]
+        update_payload = {
+            "name": first_mla["name"],
+            "party": first_mla["party"],
+            "source": "Election Commission of India / Verified KLA Secretariat"
+        }
+        put_res = client.put(f"/api/admin/mlas/{first_mla['id']}", json=update_payload, headers=headers)
+        assert put_res.status_code == 200
+        data = put_res.json()
+        assert data["last_verified"] is not None
+    run_test("Admin Representative Freshness Audit & Update API (MLAs & MPs)", test_admin_representative_management)
+
+    print("\n--- 16. Multi-Layer GIS Engine API Contract Tests ---")
+    def test_admin_gis_layers():
+        admin_login = client.post("/api/auth/login", json={
+            "email": "admin@bengaluru.gov.in",
+            "password": "Admin@123"
+        })
+        adm_token = admin_login.json()["access_token"]
+        headers = {"Authorization": f"Bearer {adm_token}"}
+
+        res = client.get("/api/admin/gis/layers", headers=headers)
+        assert res.status_code == 200
+        layers = res.json()
+        assert "layer_incidents" in layers
+        assert "layer_wards" in layers
+        assert "layer_assembly_constituencies" in layers
+        assert "layer_parliamentary_constituencies" in layers
+
+        assert len(layers["layer_wards"]["features"]) == 198
+        assert len(layers["layer_assembly_constituencies"]["features"]) == 27
+        assert len(layers["layer_parliamentary_constituencies"]["features"]) == 4
+    run_test("Multi-Layer Admin GIS API Contract (4 Canonical GIS Layers)", test_admin_gis_layers)
+
+    def test_unverified_location_fallback():
+        from PIL import Image
+        import io
+        img = Image.new("RGB", (100, 100), color=(30, 30, 30))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        files = {"file": ("no_gps.jpg", buf.getvalue(), "image/jpeg")}
+
+        # Prescreen without GPS coords
+        res = client.post("/api/reports/prescreen", files=files)
+        assert res.status_code == 200
+        d = res.json()
+        assert d["photo_gps_available"] is False
+        assert d["location_source"] == "NONE"
+        assert d["bengaluru_ward"] is None
+        assert "Location could not be verified" in d["location_unverified_message"]
+    run_test("Unverified Location Fallback (No EXIF, No Device GPS -> Clear Warning Banner)", test_unverified_location_fallback)
+
     print("\n========================================================================")
     print(f"RESULTS: {passed} PASSED, {failed} FAILED")
     print("========================================================================\n")
@@ -480,3 +730,4 @@ def test_suite():
 
 if __name__ == "__main__":
     test_suite()
+

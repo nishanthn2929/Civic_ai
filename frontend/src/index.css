@@ -1,31 +1,1703 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 /* Leaflet map styles */
 @import "leaflet/dist/leaflet.css";
 
-/* Custom animations & scrollbars */
+/* ================================================================
+   CivicAI · Bengaluru Civic Intelligence Platform
+   Realistic Premium Dark Obsidian & Luminous Emerald Design System
+   Engineered for high readability, realistic depth, glassmorphism,
+   and cinematic municipal road intelligence telemetry.
+   ================================================================ */
+
+:root {
+  /* Typography */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'DM Mono', 'Cascadia Code', 'SF Mono', monospace;
+
+  /* Realistic Midnight Surfaces */
+  --surface-void: #050811;
+  --surface-ground: #080d1a;
+  --surface-subtle: #0d1527;
+  --surface-card: #111a2e;
+  --surface-card-hover: #16223b;
+  --surface-elevated: #1b2845;
+  --surface-glass: rgba(13, 21, 39, 0.78);
+  --surface-glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Pristine Font Hierarchy */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+  --text-dark: #0f172a;
+
+  /* Borders & Dividers */
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-medium: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.20);
+  --border-glow: rgba(16, 185, 129, 0.35);
+
+  /* Realistic Premium Accents */
+  /* BBMP Emerald (Verified / Active / Safe) */
+  --emerald-300: #6ee7b7;
+  --emerald-400: #34d399;
+  --emerald-500: #10b981;
+  --emerald-600: #059669;
+  --emerald-glow: rgba(16, 185, 129, 0.25);
+  --emerald-tint: rgba(16, 185, 129, 0.10);
+  --emerald-tint-strong: rgba(16, 185, 129, 0.18);
+
+  /* Tech Cyan & Electric Blue (Radar, Geo-GIS, MLAs, Sensors) */
+  --cyan-400: #22d3ee;
+  --cyan-500: #06b6d4;
+  --cyan-glow: rgba(6, 182, 212, 0.25);
+  --cyan-tint: rgba(6, 182, 212, 0.10);
+  --blue-400: #60a5fa;
+  --blue-500: #3b82f6;
+  --blue-600: #2563eb;
+  --blue-glow: rgba(59, 130, 246, 0.25);
+  --blue-tint: rgba(59, 130, 246, 0.10);
+
+  /* Amber & Honey Gold (Road Hazards, Potholes, Medium Severity) */
+  --amber-300: #fcd34d;
+  --amber-400: #fbbf24;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --amber-glow: rgba(245, 158, 11, 0.25);
+  --amber-tint: rgba(245, 158, 11, 0.12);
+
+  /* Crimson & Coral (Critical Severity, Emergency, Structural Failure) */
+  --rose-400: #fb7185;
+  --rose-500: #f43f5e;
+  --red-400: #f87171;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-glow: rgba(239, 68, 68, 0.30);
+  --red-tint: rgba(239, 68, 68, 0.12);
+
+  /* Amethyst Violet (Department, BBMP Governance, Administration) */
+  --violet-400: #a78bfa;
+  --violet-500: #8b5cf6;
+  --violet-600: #7c3aed;
+  --violet-glow: rgba(139, 92, 246, 0.25);
+  --violet-tint: rgba(139, 92, 246, 0.10);
+
+  /* Volumetric Elevation & Realistic Glows */
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --shadow-lift: 0 12px 36px -4px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --shadow-pop: 0 20px 48px -6px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.15);
+  --shadow-glow-emerald: 0 0 25px -4px rgba(16, 185, 129, 0.4);
+  --shadow-glow-amber: 0 0 25px -4px rgba(245, 158, 11, 0.4);
+  --shadow-glow-cyan: 0 0 25px -4px rgba(6, 182, 212, 0.4);
+
+  /* Motion physics */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ----------------------------------------------------------------
+   Global Reset & Base Canvas
+   ---------------------------------------------------------------- */
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  background-color: #0b0f19;
-  color: #f3f4f6;
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+  background-color: var(--surface-void);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle background ambient mesh glow */
+body {
+  background-image:
+    radial-gradient(1000px 600px at 50% -120px, rgba(16, 185, 129, 0.07), transparent 70%),
+    radial-gradient(800px 500px at 85% 30%, rgba(6, 182, 212, 0.04), transparent 60%),
+    radial-gradient(900px 600px at 15% 80%, rgba(245, 158, 11, 0.04), transparent 60%);
+  background-attachment: fixed;
+}
+
+.font-mono {
+  font-family: var(--font-mono) !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  color: #ffffff;
+}
+
+.tabular-nums, .stat-value, .font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.35);
+  color: #ffffff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--emerald-400);
+  outline-offset: 2px;
+}
+
+/* Sleek obsidian scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-void);
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* ================================================================
+   CIVIC APP ROOT SCOPE
+   ================================================================ */
+.civic-app {
+  background-color: transparent !important;
+  color: var(--text-primary);
+}
+
+.civic-app main {
+  background: transparent;
+}
+
+/* --- 1 · Typography & Contrast ---------------------------------- */
+.civic-app .text-white { color: #ffffff !important; }
+.civic-app .text-slate-100 { color: #f8fafc !important; }
+.civic-app .text-slate-200 { color: #e2e8f0 !important; }
+.civic-app .text-slate-300 { color: #cbd5e1 !important; }
+.civic-app .text-slate-400 { color: #94a3b8 !important; }
+.civic-app .text-slate-500 { color: #64748b !important; }
+.civic-app .text-slate-600 { color: #475569 !important; }
+
+/* Emeralds */
+.civic-app .text-emerald-100 { color: #d1fae5 !important; }
+.civic-app .text-emerald-200 { color: #a7f3d0 !important; }
+.civic-app .text-emerald-300 { color: var(--emerald-300) !important; }
+.civic-app .text-emerald-400 { color: var(--emerald-400) !important; }
+.civic-app .text-emerald-500 { color: var(--emerald-500) !important; }
+
+/* Cyans & Teals */
+.civic-app .text-cyan-200 { color: #a5f3fc !important; }
+.civic-app .text-cyan-300 { color: #67e8f9 !important; }
+.civic-app .text-cyan-400 { color: var(--cyan-400) !important; }
+.civic-app .text-cyan-500 { color: var(--cyan-500) !important; }
+.civic-app .text-teal-300 { color: #5eead4 !important; }
+.civic-app .text-teal-400 { color: #2dd4bf !important; }
+
+/* Ambers & Oranges */
+.civic-app .text-amber-200 { color: #fde68a !important; }
+.civic-app .text-amber-300 { color: var(--amber-300) !important; }
+.civic-app .text-amber-400 { color: var(--amber-400) !important; }
+.civic-app .text-amber-500 { color: var(--amber-500) !important; }
+.civic-app .text-orange-300 { color: #fdba74 !important; }
+.civic-app .text-orange-400 { color: #fb923c !important; }
+
+/* Violets & Purples */
+.civic-app .text-purple-200 { color: #e9d5ff !important; }
+.civic-app .text-purple-300 { color: #d8b4fe !important; }
+.civic-app .text-purple-400 { color: #c084fc !important; }
+.civic-app .text-violet-300 { color: #c4b5fd !important; }
+.civic-app .text-violet-400 { color: var(--violet-400) !important; }
+
+/* Crimson & Roses */
+.civic-app .text-rose-300 { color: #fda4af !important; }
+.civic-app .text-rose-400 { color: var(--rose-400) !important; }
+.civic-app .text-red-300 { color: #fca5a5 !important; }
+.civic-app .text-red-400 { color: var(--red-400) !important; }
+.civic-app .text-red-500 { color: var(--red-500) !important; }
+
+/* Blues */
+.civic-app .text-blue-300 { color: #93c5fd !important; }
+.civic-app .text-blue-400 { color: var(--blue-400) !important; }
+
+/* --- 2 · Surfaces & Realistic Glassmorphism --------------------- */
+.civic-app .bg-slate-950 {
+  background-color: var(--surface-void) !important;
+}
+.civic-app .bg-slate-950\/90,
+.civic-app .bg-slate-950\/85,
+.civic-app .bg-slate-950\/80 {
+  background-color: rgba(5, 8, 17, 0.88) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.civic-app .bg-slate-950\/70,
+.civic-app .bg-slate-950\/60 {
+  background-color: rgba(8, 13, 26, 0.75) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.civic-app .bg-slate-900 {
+  background-color: var(--surface-ground) !important;
+}
+.civic-app .bg-slate-900\/90,
+.civic-app .bg-slate-900\/80,
+.civic-app .bg-slate-900\/70 {
+  background-color: var(--surface-glass) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.civic-app .bg-slate-900\/60,
+.civic-app .bg-slate-900\/50,
+.civic-app .bg-slate-900\/40 {
+  background-color: rgba(17, 26, 46, 0.55) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.civic-app .bg-slate-800 {
+  background-color: var(--surface-subtle) !important;
+}
+.civic-app .bg-slate-800\/80,
+.civic-app .bg-slate-800\/60 {
+  background-color: rgba(22, 34, 59, 0.70) !important;
+}
+.civic-app .bg-slate-700 {
+  background-color: var(--surface-card) !important;
+}
+
+/* Hover surfaces */
+.civic-app .hover\:bg-slate-900:hover {
+  background-color: var(--surface-card) !important;
+}
+.civic-app .hover\:bg-slate-800:hover,
+.civic-app .hover\:bg-slate-800\/60:hover {
+  background-color: var(--surface-card-hover) !important;
+}
+.civic-app .hover\:bg-slate-700:hover {
+  background-color: var(--surface-elevated) !important;
+}
+.civic-app .hover\:bg-white\/\[0\.04\]:hover,
+.civic-app .hover\:bg-white\/\[0\.06\]:hover,
+.civic-app .hover\:bg-white\/\[0\.08\]:hover,
+.civic-app .hover\:bg-white\/10:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* --- 3 · Realistic Borders & Dividers --------------------------- */
+.civic-app .border-slate-800,
+.civic-app .border-slate-800\/80 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+.civic-app .border-slate-700 {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+.civic-app .border-white\/5,
+.civic-app .border-white\/10,
+.civic-app .border-white\/\[0\.06\],
+.civic-app .border-white\/\[0\.08\],
+.civic-app .border-white\/\[0\.1\] {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+}
+.civic-app .border-white\/15,
+.civic-app .border-white\/20 {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+/* Glowing accent borders */
+.civic-app .border-emerald-500,
+.civic-app .border-emerald-500\/30,
+.civic-app .border-emerald-500\/40,
+.civic-app .border-emerald-500\/50,
+.civic-app .border-emerald-400,
+.civic-app .border-emerald-400\/60,
+.civic-app .border-emerald-400\/30 {
+  border-color: rgba(16, 185, 129, 0.40) !important;
+}
+.civic-app .hover\:border-emerald-400\/60:hover,
+.civic-app .hover\:border-emerald-500\/50:hover {
+  border-color: rgba(16, 185, 129, 0.75) !important;
+  box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.3) !important;
+}
+
+.civic-app .border-cyan-500\/30,
+.civic-app .border-cyan-500\/40,
+.civic-app .border-cyan-400\/60 {
+  border-color: rgba(6, 182, 212, 0.40) !important;
+}
+
+.civic-app .border-amber-500\/30,
+.civic-app .border-amber-500\/40,
+.civic-app .border-amber-400\/30,
+.civic-app .border-amber-400\/60 {
+  border-color: rgba(245, 158, 11, 0.45) !important;
+}
+.civic-app .hover\:border-amber-400\/60:hover {
+  border-color: rgba(245, 158, 11, 0.75) !important;
+  box-shadow: 0 0 15px -3px rgba(245, 158, 11, 0.3) !important;
+}
+
+.civic-app .border-rose-500\/30,
+.civic-app .border-rose-500\/40,
+.civic-app .border-red-500\/30 {
+  border-color: rgba(239, 68, 68, 0.40) !important;
+}
+
+.civic-app .border-purple-500\/30,
+.civic-app .border-purple-500\/40 {
+  border-color: rgba(139, 92, 246, 0.40) !important;
+}
+
+/* --- 4 · Translucent Tints & Badges ----------------------------- */
+.civic-app .bg-emerald-500\/10,
+.civic-app .bg-emerald-500\/15,
+.civic-app .bg-emerald-500\/20 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.civic-app .bg-emerald-950\/40,
+.civic-app .bg-emerald-950\/50,
+.civic-app .bg-emerald-950\/60 {
+  background-color: rgba(6, 44, 30, 0.5) !important;
+}
+.civic-app .bg-emerald-500 {
+  background-color: var(--emerald-500) !important;
+}
+.civic-app .bg-emerald-400 {
+  background-color: var(--emerald-400) !important;
+}
+
+.civic-app .bg-cyan-500\/10,
+.civic-app .bg-cyan-500\/20 {
+  background-color: rgba(6, 182, 212, 0.12) !important;
+}
+.civic-app .bg-cyan-500 {
+  background-color: var(--cyan-500) !important;
+}
+
+.civic-app .bg-amber-500\/10,
+.civic-app .bg-amber-500\/20,
+.civic-app .bg-amber-400\/20 {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+}
+.civic-app .bg-amber-950\/40,
+.civic-app .bg-amber-950\/50 {
+  background-color: rgba(53, 31, 5, 0.5) !important;
+}
+.civic-app .bg-amber-500 {
+  background-color: var(--amber-500) !important;
+}
+.civic-app .bg-amber-400 {
+  background-color: var(--amber-400) !important;
+}
+
+.civic-app .bg-rose-500\/10,
+.civic-app .bg-rose-500\/20,
+.civic-app .bg-red-500\/10,
+.civic-app .bg-red-500\/20 {
+  background-color: rgba(239, 68, 68, 0.14) !important;
+}
+.civic-app .bg-red-500 {
+  background-color: var(--red-500) !important;
+}
+.civic-app .bg-red-600 {
+  background-color: var(--red-600) !important;
+}
+
+.civic-app .bg-purple-500\/10,
+.civic-app .bg-purple-500\/20 {
+  background-color: rgba(139, 92, 246, 0.14) !important;
+}
+.civic-app .bg-purple-500 {
+  background-color: var(--violet-500) !important;
+}
+
+/* --- 5 · Realistic Glass Panels & Cards ------------------------- */
+.glass-panel,
+.glass-card {
+  position: relative;
+  background: var(--surface-glass);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.25s var(--ease-spring), border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.glass-card:hover {
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-2px);
+}
+
+.premium-border {
+  position: relative;
+  background: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--shadow-card);
+}
+
+.glass-pill {
+  background: rgba(17, 26, 46, 0.75);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.glass-dropdown {
+  background: rgba(13, 21, 39, 0.95);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: var(--shadow-pop);
+}
+
+/* --- 6 · High-End Interactive Action Buttons --------------------- */
+.civic-app button.bg-gradient-to-r,
+.civic-app a.bg-gradient-to-r,
+.civic-app .btn-premium {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 4px 18px -3px rgba(16, 185, 129, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: all 0.22s var(--ease-spring);
+}
+
+.civic-app button.bg-gradient-to-r:hover:not(:disabled),
+.civic-app a.bg-gradient-to-r:hover:not(:disabled),
+.civic-app .btn-premium:hover:not(:disabled) {
+  background: linear-gradient(135deg, #34d399 0%, #059669 100%) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px rgba(16, 185, 129, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.civic-app button.bg-gradient-to-r:active:not(:disabled),
+.civic-app .btn-premium:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.civic-app button.bg-gradient-to-r:disabled,
+.civic-app .btn-premium:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  transform: none;
+}
+
+/* Secondary Ghost Buttons */
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* Preset Cards */
+.civic-app .civic-btn-preset {
+  display: block;
+  width: 100%;
+  color: var(--text-primary) !important;
+  background: rgba(17, 26, 46, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 0.85rem !important;
+  box-shadow: var(--shadow-card);
+  transition: all 0.22s ease;
+}
+.civic-app .civic-btn-preset:hover {
+  background: rgba(22, 34, 59, 0.9) !important;
+  border-color: rgba(16, 185, 129, 0.45) !important;
+  box-shadow: 0 8px 25px -4px rgba(16, 185, 129, 0.25);
+  transform: translateY(-2px);
+}
+
+/* --- 7 · Form Controls & Inputs --------------------------------- */
+.civic-app input,
+.civic-app textarea,
+.civic-app select {
+  color: #ffffff !important;
+  background-color: rgba(8, 13, 26, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.civic-app input::placeholder,
+.civic-app textarea::placeholder {
+  color: #64748b !important;
+}
+.civic-app input:focus,
+.civic-app textarea:focus,
+.civic-app select:focus {
+  outline: none !important;
+  border-color: var(--emerald-400) !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2) !important;
+}
+
+.input-premium {
+  background: rgba(8, 13, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.input-premium:focus {
+  outline: none;
+  border-color: var(--emerald-400);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+/* Custom range sliders */
+input[type="range"].slider-custom {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #1e293b;
+  border-radius: 999px;
+  outline: none;
+}
+input[type="range"].slider-custom::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--emerald-400);
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.6);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+input[type="range"].slider-custom::-webkit-slider-thumb:hover {
+  transform: scale(1.18);
+  box-shadow: 0 2px 16px rgba(16, 185, 129, 0.8);
+}
+input[type="range"].slider-custom.accent-amber::-webkit-slider-thumb {
+  background: var(--amber-400);
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.6);
+}
+
+/* --- 8 · Decorative & Motion Primitives -------------------------- */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--emerald-400);
+}
+.eyebrow::before {
+  content: '';
+  width: 1.25rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--emerald-400);
+  box-shadow: 0 0 8px var(--emerald-400);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--emerald-300);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  box-shadow: var(--shadow-xs);
+}
+
+.stat-value {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.divider-glow {
+  height: 1px;
+  border: none;
+  background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.5) 30%, rgba(6, 182, 212, 0.5) 70%, transparent);
+}
+
+.text-aurora {
+  background: linear-gradient(135deg, #34d399 0%, #22d3ee 50%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Badges with ambient glow */
+.badge-glow-emerald {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--emerald-300);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+.badge-glow-cyan {
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--cyan-300);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
+}
+.badge-glow-amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--amber-300);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+}
+.badge-glow-rose {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--rose-400);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.15);
+}
+.badge-glow-purple {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--violet-400);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.15);
+}
+
+/* Keyframe animations */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+@keyframes pulse-glow-emerald {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
+  50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+}
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes audio-ring-expand {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { opacity: 0.35; }
+  100% { transform: scale(1.75); opacity: 0; }
+}
+
+.animate-in-up { animation: fade-in-up 0.55s var(--ease-spring) both; }
+.pulse-critical { animation: pulse-ring 2s infinite; }
+.pulse-glow-emerald { animation: pulse-glow-emerald 2.5s infinite; }
+.audio-wave-1 { animation: audio-ring-expand 2s cubic-bezier(0.25, 1, 0.5, 1) infinite; }
+.audio-wave-2 { animation: audio-ring-expand 2s cubic-bezier(0.25, 1, 0.5, 1) infinite 0.65s; }
+.audio-wave-3 { animation: audio-ring-expand 2s cubic-bezier(0.25, 1, 0.5, 1) infinite 1.3s; }
+
+/* ================================================================
+   CUSTOM CURSOR — Ultra-Smooth Luminous Spatial Ring
+   ================================================================ */
+/* ================================================================
+   SLEEK CYBER NEON ARROW CURSOR
+   ================================================================ */
+.cyber-cursor-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none !important;
+  z-index: 9999999;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.cyber-cursor-arrow-wrapper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  /* (2, 2) inside the 32x32 SVG is the exact sharp arrowhead hotspot */
+  margin-top: -2px;
+  margin-left: -2px;
+  will-change: transform;
+  transition: filter 0.2s ease;
+  filter: drop-shadow(0 2px 8px rgba(34, 211, 238, 0.5)) drop-shadow(0 0 16px rgba(16, 185, 129, 0.35));
+}
+
+.cyber-cursor-arrow-wrapper.is-hovering {
+  transform-origin: 2px 2px;
+  filter: drop-shadow(0 2px 14px rgba(34, 211, 238, 0.8)) drop-shadow(0 0 24px rgba(52, 211, 153, 0.65));
+}
+
+.cyber-cursor-arrow-wrapper.is-clicking {
+  transform-origin: 2px 2px;
+  transform: scale(0.85) !important;
+  filter: drop-shadow(0 0 20px rgba(52, 211, 153, 0.95));
+}
+
+.cyber-cursor-trail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px;
+  margin-left: -10px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.25) 0%, rgba(16, 185, 129, 0.08) 60%, transparent 100%);
+  filter: blur(4px);
+  will-change: transform;
+  transition: opacity 0.3s ease;
+}
+
+.cyber-cursor-trail.trail-hover {
+  width: 32px;
+  height: 32px;
+  margin-top: -16px;
+  margin-left: -16px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.35) 0%, rgba(6, 182, 212, 0.15) 60%, transparent 100%);
+  filter: blur(5px);
+}
+
+.cyber-click-wave {
+  position: fixed;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  margin-top: -4px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999998;
+  border: 1.5px solid #34d399;
+  background: rgba(52, 211, 153, 0.25);
+  box-shadow: 0 0 12px #34d399;
+  animation: cyber-click-expand 0.45s cubic-bezier(0.1, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes cyber-click-expand {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(5.5);
+    opacity: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .cyber-cursor-root,
+  .cyber-click-wave {
+    display: none !important;
+  }
+}
+
+@media (pointer: fine) {
+  html.has-custom-cursor,
+  html.has-custom-cursor body,
+  html.has-custom-cursor button,
+  html.has-custom-cursor a,
+  html.has-custom-cursor [role="button"],
+  html.has-custom-cursor .cursor-pointer,
+  html.has-custom-cursor .nav-btn {
+    cursor: none !important;
+  }
+  html.has-custom-cursor input,
+  html.has-custom-cursor textarea {
+    cursor: text !important;
+  }
+}
+
+/* ================================================================
+   FULL-PAGE HD AMBIENT BACKGROUND IMAGE
+   ================================================================ */
+.full-page-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.full-page-bg > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 36%;
+  filter: brightness(0.92) contrast(1.14) saturate(1.22);
+  transform: scale(1.02);
+  transition: filter 0.8s ease;
+}
+.full-page-bg-overlay {
+  position: absolute;
+  inset: 0;
+  background: 
+    radial-gradient(ellipse at 50% 20%, rgba(5, 8, 17, 0.15) 0%, rgba(5, 8, 17, 0.45) 55%, rgba(5, 8, 17, 0.85) 100%),
+    linear-gradient(180deg, rgba(5, 8, 17, 0.22) 0%, rgba(5, 8, 17, 0.15) 25%, rgba(5, 8, 17, 0.62) 65%, rgba(5, 8, 17, 0.94) 100%),
+    radial-gradient(1200px 800px at 80% 20%, rgba(6, 182, 212, 0.08), transparent 60%),
+    radial-gradient(1000px 700px at 20% 80%, rgba(16, 185, 129, 0.08), transparent 60%);
+}
+
+/* ================================================================
+   PUBLIC HERO SECTION
+   ================================================================ */
+.civic-app .public-hero {
+  position: relative;
+  width: 100%;
+  min-height: calc(100vh - 72px);
+  border: 0;
+  border-radius: 0 !important;
+  overflow: hidden;
+  background: transparent;
+}
+.civic-app .public-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 38%, transparent 0%, rgba(5, 8, 17, 0.15) 55%, rgba(5, 8, 17, 0.5) 100%);
+  pointer-events: none;
+}
+.civic-app .public-hero > div {
+  position: relative;
+  z-index: 10;
+  min-height: calc(100vh - 72px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.civic-app .public-hero h1 {
+  color: #ffffff !important;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  font-size: clamp(2.4rem, 5.2vw, 4.8rem);
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.9);
+}
+.civic-app .public-hero .text-emerald-300 {
+  color: var(--emerald-300) !important;
+  text-shadow: 0 0 25px rgba(16, 185, 129, 0.6);
+}
+
+/* ================================================================
+   PREMIUM REALISTIC BUTTONS ENGINE
+   ================================================================ */
+/* Base realistic push-button physics across all buttons */
+.civic-app button,
+.btn-realistic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.2s ease,
+              border-color 0.2s ease,
+              color 0.2s ease;
+  will-change: transform, box-shadow;
+}
+
+/* Mechanical hover lift */
+.civic-app button:hover:not(:disabled),
+.btn-realistic:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+}
+
+/* Mechanical tactile depression on active click */
+.civic-app button:active:not(:disabled),
+.btn-realistic:active:not(:disabled) {
+  transform: translateY(1.5px) scale(0.985);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Realistic Emerald Jewel Button */
+.btn-premium-emerald,
+.civic-app button.bg-emerald-400,
+.civic-app button.bg-emerald-500 {
+  background: linear-gradient(180deg, #34d399 0%, #10b981 48%, #059669 100%) !important;
+  color: #032315 !important;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  border-top-color: rgba(255, 255, 255, 0.7) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 
+    0 4px 18px -1px rgba(16, 185, 129, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.btn-premium-emerald:hover:not(:disabled),
+.civic-app button.bg-emerald-400:hover:not(:disabled),
+.civic-app button.bg-emerald-500:hover:not(:disabled) {
+  background: linear-gradient(180deg, #6ee7b7 0%, #34d399 48%, #10b981 100%) !important;
+  box-shadow: 
+    0 8px 25px -2px rgba(16, 185, 129, 0.6),
+    0 4px 10px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25) !important;
+}
+
+.btn-premium-emerald:active:not(:disabled),
+.civic-app button.bg-emerald-400:active:not(:disabled),
+.civic-app button.bg-emerald-500:active:not(:disabled) {
+  background: linear-gradient(180deg, #10b981 0%, #059669 100%) !important;
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.7),
+    inset 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Realistic White Ceramic / Smoked Glass Secondary Button */
+.civic-app button.bg-white\/95,
+.civic-app button.bg-white {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 60%, #e2e8f0 100%) !important;
+  color: #0f172a !important;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  border-bottom-color: rgba(148, 163, 184, 0.6) !important;
+  box-shadow: 
+    0 4px 18px -2px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15) !important;
+}
+
+.civic-app button.bg-white\/95:hover:not(:disabled),
+.civic-app button.bg-white:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+  box-shadow: 
+    0 8px 24px -2px rgba(255, 255, 255, 0.25),
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+/* Realistic Smoked Glass Button */
+.btn-premium-glass,
+.civic-app button.bg-white\/5,
+.civic-app button.bg-white\/10,
+.civic-app button.bg-slate-900,
+.civic-app button.bg-slate-800 {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 100%) !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-top-color: rgba(255, 255, 255, 0.24) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 
+    0 3px 12px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+
+.btn-premium-glass:hover:not(:disabled),
+.civic-app button.bg-white\/5:hover:not(:disabled),
+.civic-app button.bg-white\/10:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.07) 100%) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  color: #ffffff !important;
+  box-shadow: 
+    0 6px 20px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+/* ================================================================
+   PREMIUM REALISTIC NAVBAR & DOCK
+   ================================================================ */
+.premium-navbar {
+  width: 100% !important;
+  border-radius: 0 !important;
+  background: linear-gradient(180deg, rgba(10, 16, 32, 0.88) 0%, rgba(5, 8, 17, 0.92) 100%) !important;
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 
+    0 10px 30px -5px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+.navbar-specular-beam {
+  filter: blur(0.3px);
+  animation: specular-sweep 6s ease-in-out infinite alternate;
+}
+
+@keyframes specular-sweep {
+  0% { opacity: 0.3; transform: scaleX(0.7); }
+  50% { opacity: 0.9; transform: scaleX(1); }
+  100% { opacity: 0.4; transform: scaleX(0.8); }
+}
+
+/* Recessed Control Bar Dock */
+.nav-dock {
+  background: rgba(4, 7, 15, 0.85) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-top-color: rgba(0, 0, 0, 0.6) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.8),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 1px rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Tactile Navigation Buttons */
+.nav-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.46rem 0.86rem;
+  border-radius: 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.nav-btn:hover {
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-top-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 
+    0 3px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.nav-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+/* 1. Public Portal — Arctic Sky / Cyan */
+.nav-btn-sky-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.35) 0%, rgba(2, 132, 199, 0.22) 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.6) !important;
+  border-top-color: rgba(125, 211, 252, 0.8) !important;
+  border-bottom-color: rgba(3, 105, 161, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(14, 165, 233, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-sky-active svg {
+  color: #38bdf8;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.85));
+}
+.nav-btn-sky:hover svg {
+  color: #38bdf8;
+}
+
+/* 2. Report Issue — Civic Emerald */
+.nav-btn-emerald-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.36) 0%, rgba(5, 150, 105, 0.24) 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.6) !important;
+  border-top-color: rgba(110, 231, 183, 0.8) !important;
+  border-bottom-color: rgba(4, 120, 87, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(16, 185, 129, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-emerald-active svg {
+  color: #34d399;
+  filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.85));
+}
+.nav-btn-emerald:hover svg {
+  color: #34d399;
+}
+
+/* 3. Voice Grievance — Aurora Violet */
+.nav-btn-violet-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.36) 0%, rgba(139, 92, 246, 0.24) 100%) !important;
+  border: 1px solid rgba(192, 132, 252, 0.6) !important;
+  border-top-color: rgba(216, 180, 254, 0.8) !important;
+  border-bottom-color: rgba(126, 34, 206, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(168, 85, 247, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-violet-active svg {
+  color: #c084fc;
+  filter: drop-shadow(0 0 8px rgba(192, 132, 252, 0.85));
+}
+.nav-btn-violet:hover svg {
+  color: #c084fc;
+}
+
+/* 4. Drive Mode — Aviation Amber Cockpit */
+.nav-btn-amber-active {
+  color: #fffbeb !important;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.38) 0%, rgba(217, 119, 6, 0.25) 100%) !important;
+  border: 1px solid rgba(251, 191, 36, 0.65) !important;
+  border-top-color: rgba(252, 211, 77, 0.85) !important;
+  border-bottom-color: rgba(180, 83, 9, 0.4) !important;
+  box-shadow: 
+    0 4px 18px rgba(245, 158, 11, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-amber-active svg {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.85));
+}
+.nav-btn-amber:hover svg {
+  color: #fbbf24;
+}
+
+/* 5. My Reports — Mint Teal Ledger */
+.nav-btn-teal-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.36) 0%, rgba(13, 148, 136, 0.24) 100%) !important;
+  border: 1px solid rgba(45, 212, 191, 0.6) !important;
+  border-top-color: rgba(94, 234, 212, 0.8) !important;
+  border-bottom-color: rgba(15, 118, 110, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(20, 184, 166, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-teal-active svg {
+  color: #2dd4bf;
+  filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.85));
+}
+.nav-btn-teal:hover svg {
+  color: #2dd4bf;
+}
+
+/* 6. Authority Dashboard — Electric Cobalt */
+.nav-btn-blue-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.38) 0%, rgba(37, 99, 235, 0.25) 100%) !important;
+  border: 1px solid rgba(96, 165, 250, 0.6) !important;
+  border-top-color: rgba(147, 197, 253, 0.8) !important;
+  border-bottom-color: rgba(29, 78, 216, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(59, 130, 246, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-blue-active svg {
+  color: #60a5fa;
+  filter: drop-shadow(0 0 8px rgba(96, 165, 250, 0.85));
+}
+.nav-btn-blue:hover svg {
+  color: #60a5fa;
+}
+
+/* 7. Admin Config — Imperial Fuchsia / Rose */
+.nav-btn-fuchsia-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(217, 70, 239, 0.36) 0%, rgba(192, 38, 211, 0.24) 100%) !important;
+  border: 1px solid rgba(232, 121, 249, 0.6) !important;
+  border-top-color: rgba(240, 171, 252, 0.8) !important;
+  border-bottom-color: rgba(162, 28, 175, 0.4) !important;
+  box-shadow: 
+    0 4px 16px rgba(217, 70, 239, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+}
+.nav-btn-fuchsia-active svg {
+  color: #e879f9;
+  filter: drop-shadow(0 0 8px rgba(232, 121, 249, 0.85));
+}
+.nav-btn-fuchsia:hover svg {
+  color: #e879f9;
+}
+
+/* 8. Auth Action Button — Realistic Tactile Jewel Push Button */
+.nav-auth-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.46rem 1.05rem;
+  border-radius: 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #032315 !important;
+  background: linear-gradient(180deg, #34d399 0%, #10b981 50%, #059669 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-top-color: rgba(255, 255, 255, 0.8) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 
+    0 4px 16px rgba(16, 185, 129, 0.45),
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-auth-btn:hover {
+  background: linear-gradient(180deg, #6ee7b7 0%, #34d399 50%, #10b981 100%) !important;
+  box-shadow: 
+    0 8px 24px rgba(16, 185, 129, 0.65),
+    0 3px 8px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25) !important;
+  transform: translateY(-1.5px);
+}
+
+.nav-auth-btn:active {
+  transform: translateY(1.5px) scale(0.98);
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.7),
+    inset 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ================================================================
+   DRIVE MODE HUD (Reference: Tesla / Pothole Reporter Cockpit)
+   ================================================================ */
+.drive-mode-shell {
+  max-width: 1120px;
+  color: #ffffff;
+}
+
+.drive-mode-active {
+  background: #000000 !important;
+  border: 2px solid rgba(245, 158, 11, 0.75) !important;
+  border-radius: 1.5rem !important;
+  box-shadow: 0 0 40px -5px rgba(245, 158, 11, 0.25), 0 25px 60px -10px rgba(0, 0, 0, 0.9) !important;
+}
+
+.hud-card {
+  background: rgba(13, 21, 39, 0.85) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border-radius: 1rem !important;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.hud-card:hover {
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  box-shadow: 0 0 20px -3px rgba(245, 158, 11, 0.3) !important;
+}
+
+/* ================================================================
+   MAPS — Google Maps & Leaflet Dark Satellite Integration
+   ================================================================ */
+.incident-map-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  background: #080d1a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-card);
 }
 
 .leaflet-container {
   width: 100%;
   height: 100%;
+  border-radius: 1rem;
+  background-color: #080d1a !important;
+  font-family: var(--font-sans) !important;
+}
+
+.leaflet-bar {
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 0.65rem !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.leaflet-bar a {
+  background: rgba(13, 21, 39, 0.92) !important;
+  color: #e2e8f0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  transition: all 0.2s ease;
+}
+.leaflet-bar a:hover {
+  background: rgba(22, 34, 59, 1) !important;
+  color: #34d399 !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: rgba(13, 21, 39, 0.95) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 1rem !important;
+  color: #ffffff !important;
+  box-shadow: var(--shadow-pop) !important;
+  padding: 6px !important;
+}
+.leaflet-popup-tip {
+  background: rgba(13, 21, 39, 0.95) !important;
+}
+.leaflet-popup-close-button {
+  color: #94a3b8 !important;
+}
+.leaflet-popup-close-button:hover {
+  color: #ffffff !important;
+}
+
+.map-layer-badge, .map-switcher, .map-legend {
+  position: absolute;
+  z-index: 2;
+  color: #ffffff;
+  background: rgba(13, 21, 39, 0.90);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.75rem;
-  z-index: 10;
+  box-shadow: var(--shadow-lift);
 }
 
-/* Custom pulsing marker for high severity */
-@keyframes pulse-ring {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-  70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+.map-switcher button {
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+.map-switcher button:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.map-switcher button.active {
+  color: #ffffff;
+  background: var(--emerald-500);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.4);
 }
 
-.pulse-critical {
-  animation: pulse-ring 2s infinite;
+/* ================================================================
+   CIVIC ASSISTANT CONCIERGE — Dark Glass Floating Panel
+   ================================================================ */
+.civic-assistant {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
 }
+
+.civic-assistant-panel {
+  width: min(24rem, calc(100vw - 2rem));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1.25rem;
+  background: rgba(13, 21, 39, 0.96);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(16, 185, 129, 0.2);
+  animation: assistant-rise 0.3s var(--ease-spring) both;
+}
+
+@keyframes assistant-rise {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.civic-assistant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), transparent 70%);
+}
+
+.civic-assistant-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.civic-assistant-mark {
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
+  place-items: center;
+  color: #ffffff;
+  border-radius: 0.65rem;
+  background: linear-gradient(135deg, var(--emerald-400), var(--cyan-500));
+  box-shadow: 0 4px 14px -3px rgba(16, 185, 129, 0.6);
+}
+
+.civic-assistant-identity strong { color: #ffffff; font-size: 0.78rem; font-weight: 800; }
+.civic-assistant-identity span { color: var(--emerald-400); font: 0.62rem var(--font-mono); }
+.civic-assistant-identity i {
+  display: inline-block;
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  background: var(--emerald-400);
+  box-shadow: 0 0 8px var(--emerald-400);
+}
+
+.civic-assistant-messages {
+  display: flex;
+  max-height: 19rem;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.civic-message {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 90%;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.civic-message.assistant {
+  align-self: flex-start;
+  background: rgba(22, 34, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.2rem 1rem 1rem 1rem;
+  color: #e2e8f0;
+}
+
+.civic-message.user {
+  align-self: flex-end;
+  padding: 0.65rem 0.85rem;
+  color: #ffffff;
+  border-radius: 1rem 1rem 0.2rem 1rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.35);
+  font-weight: 600;
+}
+
+.civic-assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 1rem 0.85rem;
+}
+
+.civic-assistant-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.65rem;
+  color: var(--emerald-300);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 0.6rem;
+  background: rgba(16, 185, 129, 0.1);
+  cursor: pointer;
+  font: 600 0.64rem var(--font-sans);
+  transition: all 0.2s ease;
+}
+.civic-assistant-actions button:hover {
+  color: #ffffff;
+  border-color: var(--emerald-400);
+  background: var(--emerald-600);
+  transform: translateY(-1px);
+}
+
+.civic-assistant-input {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 13, 26, 0.85);
+}
+
+.civic-assistant-input input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.65rem 0.85rem;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  background: rgba(17, 26, 46, 0.8);
+  font: 0.72rem var(--font-sans);
+}
+.civic-assistant-input input:focus {
+  border-color: var(--emerald-400);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.civic-assistant-input button {
+  display: grid;
+  width: 2.3rem;
+  place-items: center;
+  color: #ffffff;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--emerald-500);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.civic-assistant-input button:hover {
+  background: var(--emerald-600);
+}
+
+.civic-assistant-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.15rem;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 8px 25px -4px rgba(16, 185, 129, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  font: 800 0.75rem var(--font-sans);
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+}
+.civic-assistant-launcher:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 12px 30px -4px rgba(16, 185, 129, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* ================================================================
+   Drive Mode Pothole Detection Bounding Boxes Overlay
+   ================================================================ */
+
+.drive-detection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 20;
+}
+
+.drive-bbox-rect {
+  position: absolute;
+  border: 2.5px solid #ef4444;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.85), inset 0 0 12px rgba(239, 68, 68, 0.35);
+  pointer-events: auto;
+  transition: opacity 0.2s ease;
+  animation: drive-bbox-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.drive-bbox-rect.severity-high,
+.drive-bbox-rect.severity-medium,
+.drive-bbox-rect.severity-low {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.85), inset 0 0 12px rgba(239, 68, 68, 0.35);
+}
+
+/* Reticle Corner Brackets */
+.drive-bbox-corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-color: #ef4444;
+}
+.drive-bbox-corner-tl {
+  top: -2.5px;
+  left: -2.5px;
+  border-top: 3px solid #ef4444;
+  border-left: 3px solid #ef4444;
+}
+.drive-bbox-corner-tr {
+  top: -2.5px;
+  right: -2.5px;
+  border-top: 3px solid #ef4444;
+  border-right: 3px solid #ef4444;
+}
+.drive-bbox-corner-bl {
+  bottom: -2.5px;
+  left: -2.5px;
+  border-bottom: 3px solid #ef4444;
+  border-left: 3px solid #ef4444;
+}
+.drive-bbox-corner-br {
+  bottom: -2.5px;
+  right: -2.5px;
+  border-bottom: 3px solid #ef4444;
+  border-right: 3px solid #ef4444;
+}
+
+/* Floating Solid Red Bounding Box Label with Confidence Score */
+.drive-bbox-label {
+  position: absolute;
+  top: -25px;
+  left: -2.5px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #ffffff;
+  background: #dc2626;
+  border: 1.5px solid #ef4444;
+  border-bottom: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.drive-bbox-label.label-inside {
+  top: 2px;
+  border-radius: 0 0 4px 4px;
+  border-bottom: 1.5px solid #ef4444;
+  border-top: none;
+}
+
+.drive-bbox-rect.severity-high .drive-bbox-label,
+.drive-bbox-rect.severity-medium .drive-bbox-label,
+.drive-bbox-rect.severity-low .drive-bbox-label {
+  background: #dc2626;
+  border-color: #ef4444;
+}
+
+@keyframes drive-bbox-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+

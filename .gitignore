@@ -16,3 +16,12 @@ ml_pipeline/coco_dataset/
 ml_pipeline/dataset/
 .DS_Store
 Thumbs.db
+.env
+backend/.env
+.pytest_cache/
+recording-frame-*.png
+*.pt
+!backend/data/*.pt
+# ml_pipeline weights are duplicated from backend/data
+frontend/eng.traineddata
+

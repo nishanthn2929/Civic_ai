@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from shapely.geometry import shape, Point
 from backend.app.core.config import settings
+from backend.app.services.constituency_service import constituency_service
 
 WARDS_GEOJSON_PATH = Path(settings.DATA_DIR) / "bengaluru_wards.geojson"
 
@@ -219,6 +220,7 @@ class BengaluruGISService:
             Never guesses or presents an estimated ward as an exact ward.
         """
         osm_info = self.fetch_osm_reverse(lat, lon) if fetch_osm else None
+        const_info = constituency_service.resolve_constituencies(lat, lon) or {}
 
         # 1. Exact Point-in-Polygon check against authentic BBMP wards (Requirement 7)
         pt = Point(lon, lat)  # WGS84: (lon, lat)
@@ -245,8 +247,22 @@ class BengaluruGISService:
                     "ward_name": props["ward_name"],
                     "zone_name": props.get("zone_name") or "Bengaluru",
                     "pincode": osm_info.get("postcode") if osm_info and osm_info.get("postcode") else props.get("pincode"),
-                    "assembly_constituency": props.get("assembly_constituency"),
-                    "parliament_constituency": props.get("parliament_constituency"),
+                    "assembly_constituency": const_info.get("assembly_constituency") or props.get("assembly_constituency"),
+                    "assembly_constituency_number": const_info.get("assembly_constituency_number"),
+                    "mla_name": const_info.get("mla_name"),
+                    "mla_party": const_info.get("mla_party"),
+                    "mla_source": const_info.get("mla_source"),
+                    "mla_profile_url": const_info.get("mla_profile_url"),
+                    "mla_last_verified": const_info.get("mla_last_verified"),
+                    "parliamentary_constituency": const_info.get("parliamentary_constituency") or props.get("parliament_constituency"),
+                    "parliamentary_constituency_number": const_info.get("parliamentary_constituency_number"),
+                    "mp_name": const_info.get("mp_name"),
+                    "mp_party": const_info.get("mp_party"),
+                    "mp_source": const_info.get("mp_source"),
+                    "mp_profile_url": const_info.get("mp_profile_url"),
+                    "mp_last_verified": const_info.get("mp_last_verified"),
+                    "boundary_warning": const_info.get("boundary_warning", False),
+                    "boundary_warning_message": const_info.get("boundary_warning_message"),
                     "region_name": "Bengaluru Urban",
                     "exact_road": osm_info.get("road") if osm_info else None,
                     "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
@@ -287,8 +303,22 @@ class BengaluruGISService:
                 "ward_name": props["ward_name"],
                 "zone_name": props.get("zone_name") or "Bengaluru",
                 "pincode": osm_info.get("postcode") if osm_info and osm_info.get("postcode") else props.get("pincode"),
-                "assembly_constituency": props.get("assembly_constituency"),
-                "parliament_constituency": props.get("parliament_constituency"),
+                "assembly_constituency": const_info.get("assembly_constituency") or props.get("assembly_constituency"),
+                "assembly_constituency_number": const_info.get("assembly_constituency_number"),
+                "mla_name": const_info.get("mla_name"),
+                "mla_party": const_info.get("mla_party"),
+                "mla_source": const_info.get("mla_source"),
+                "mla_profile_url": const_info.get("mla_profile_url"),
+                "mla_last_verified": const_info.get("mla_last_verified"),
+                "parliamentary_constituency": const_info.get("parliamentary_constituency") or props.get("parliament_constituency"),
+                "parliamentary_constituency_number": const_info.get("parliamentary_constituency_number"),
+                "mp_name": const_info.get("mp_name"),
+                "mp_party": const_info.get("mp_party"),
+                "mp_source": const_info.get("mp_source"),
+                "mp_profile_url": const_info.get("mp_profile_url"),
+                "mp_last_verified": const_info.get("mp_last_verified"),
+                "boundary_warning": const_info.get("boundary_warning", False),
+                "boundary_warning_message": const_info.get("boundary_warning_message"),
                 "region_name": "Bengaluru Urban",
                 "exact_road": osm_info.get("road") if osm_info else None,
                 "exact_neighbourhood": osm_info.get("neighbourhood") if osm_info else None,
@@ -346,6 +376,22 @@ class BengaluruGISService:
             "official_ward_status": "BBMP ward could not be determined.",
             "zone_name": "Non-BBMP",
             "pincode": osm_info.get("postcode") if osm_info else None,
+            "assembly_constituency": const_info.get("assembly_constituency"),
+            "assembly_constituency_number": const_info.get("assembly_constituency_number"),
+            "mla_name": const_info.get("mla_name"),
+            "mla_party": const_info.get("mla_party"),
+            "mla_source": const_info.get("mla_source"),
+            "mla_profile_url": const_info.get("mla_profile_url"),
+            "mla_last_verified": const_info.get("mla_last_verified"),
+            "parliamentary_constituency": const_info.get("parliamentary_constituency"),
+            "parliamentary_constituency_number": const_info.get("parliamentary_constituency_number"),
+            "mp_name": const_info.get("mp_name"),
+            "mp_party": const_info.get("mp_party"),
+            "mp_source": const_info.get("mp_source"),
+            "mp_profile_url": const_info.get("mp_profile_url"),
+            "mp_last_verified": const_info.get("mp_last_verified"),
+            "boundary_warning": const_info.get("boundary_warning", False),
+            "boundary_warning_message": const_info.get("boundary_warning_message"),
             "region_name": region_display,
             "state": osm_info.get("state") if osm_info else None,
             "exact_road": osm_info.get("road") if osm_info else None,

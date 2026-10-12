@@ -1,0 +1,12 @@
+{
+  "name": "civicai-bengaluru",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && npx vite",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "preview": "npm --prefix frontend run preview",
+    "start": "python start.py"
+  }
+}

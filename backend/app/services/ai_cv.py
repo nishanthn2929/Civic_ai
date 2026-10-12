@@ -19,25 +19,37 @@ class ComputerVisionService:
         self._init_model()
 
     def _init_model(self):
-        """Initialize YOLO model using ultralytics if available, prioritizing trained pothole weights."""
+        """Initialize the road-defect detector using the best available trained model."""
         try:
-            from ultralytics import YOLO
-            data_pothole = Path(settings.DATA_DIR) / "yolov8_pothole_best.pt"
-            pipeline_pothole = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "pothole_best.pt"
-            generic_yolo = Path(settings.DATA_DIR) / "yolov8n.pt"
+            from ultralytics import YOLO, RTDETR
+            data_yolo = Path(settings.DATA_DIR) / "yolov8_pothole_best.pt"
+            pipeline_yolo = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "yolov8_pothole_best.pt"
+            data_multiclass = Path(settings.DATA_DIR) / "civic_multiclass_rtdetr_best.pt"
+            pipeline_multiclass = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "civic_multiclass_rtdetr_best.pt"
+            data_pothole = Path(settings.DATA_DIR) / "rtdetr_pothole_best.pt"
+            pipeline_pothole = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "rtdetr_pothole_best.pt"
 
-            if data_pothole.exists():
-                self.model = YOLO(str(data_pothole))
-                self.model_name = f"Custom-Trained Pothole YOLOv8 ({data_pothole.name})"
+            if data_yolo.exists():
+                self.model = YOLO(str(data_yolo))
+                self.model_name = f"Fine-Tuned Road Detector ({data_yolo.name})"
+            elif pipeline_yolo.exists():
+                self.model = YOLO(str(pipeline_yolo))
+                self.model_name = f"Fine-Tuned Road Detector ({pipeline_yolo.name})"
+            elif data_multiclass.exists():
+                self.model = RTDETR(str(data_multiclass))
+                self.model_name = f"Custom Multiclass RT-DETR ({data_multiclass.name})"
+            elif pipeline_multiclass.exists():
+                self.model = RTDETR(str(pipeline_multiclass))
+                self.model_name = f"Custom Multiclass RT-DETR ({pipeline_multiclass.name})"
+            elif data_pothole.exists():
+                self.model = RTDETR(str(data_pothole))
+                self.model_name = f"Custom-Trained RT-DETR ({data_pothole.name})"
             elif pipeline_pothole.exists():
-                self.model = YOLO(str(pipeline_pothole))
-                self.model_name = f"Custom-Trained Pothole YOLOv8 ({pipeline_pothole.name})"
-            elif generic_yolo.exists():
-                self.model = YOLO(str(generic_yolo))
-                self.model_name = f"YOLOv8n ({generic_yolo.name})"
+                self.model = RTDETR(str(pipeline_pothole))
+                self.model_name = f"Custom-Trained RT-DETR ({pipeline_pothole.name})"
             else:
                 self.model = YOLO("yolov8n.pt")
-                self.model_name = "YOLOv8n (default)"
+                self.model_name = "YOLOv8n (pretrained fallback)"
             print(f"[CV Service] Loaded road defect detection model: {self.model_name}")
         except Exception as e:
             print(f"[CV Service Warning] Ultralytics initialization notice: {e}. Fallback detection pipeline active.")
@@ -96,83 +108,161 @@ class ComputerVisionService:
         is_clear = blur_val >= settings.DEFAULT_BLUR_THRESHOLD
 
         detections: List[Dict[str, Any]] = []
+        candidate_boxes: List[Dict[str, Any]] = []
 
-        # Run real YOLO inference if model is loaded
+        # 1. Neural Model Inference (YOLOv8 / RT-DETR)
         if self.model is not None:
             try:
                 results = self.model(img, conf=confidence_threshold, verbose=False)
                 for r in results:
-                    boxes = r.boxes
-                    for box in boxes:
-                        cls_id = int(box.cls[0].item())
-                        cls_name = self.model.names[cls_id]
-                        conf = float(box.conf[0].item())
-                        xyxy = box.xyxy[0].tolist()
+                    if len(r.boxes) > 0:
+                        for box in r.boxes:
+                            cls_id = int(box.cls[0].item())
+                            cls_name = self.model.names[cls_id]
+                            conf = float(box.conf[0].item())
+                            xyxy = box.xyxy[0].tolist()
 
-                        # Map standard YOLO classes or custom pothole classes
-                        mapped_category = "Pothole"
-                        if cls_name.lower() in ["crack", "road_crack"]:
-                            mapped_category = "Road Crack"
-                        elif cls_name.lower() in ["damage", "road_damage"]:
-                            mapped_category = "Road Damage"
+                            # Clamp box strictly within image bounds
+                            x1 = max(0.0, min(float(w), xyxy[0]))
+                            y1 = max(0.0, min(float(h), xyxy[1]))
+                            x2 = max(0.0, min(float(w), xyxy[2]))
+                            y2 = max(0.0, min(float(h), xyxy[3]))
+                            bw = x2 - x1
+                            bh = y2 - y1
 
-                        detections.append({
-                            "class_name": mapped_category,
-                            "confidence": round(conf, 3),
-                            "bbox": [round(c, 1) for c in xyxy],
-                            "normalized_bbox": [
-                                round(xyxy[0] / w, 3),
-                                round(xyxy[1] / h, 3),
-                                round(xyxy[2] / w, 3),
-                                round(xyxy[3] / h, 3)
-                            ]
-                        })
+                            # Road ROI constraint: Potholes exist on the road surface
+                            # Exclude boxes entirely in sky / horizon (y1 < h * 0.14)
+                            if y1 < (h * 0.14) and y2 < (h * 0.22):
+                                continue
+                            if bw < 18 or bh < 15 or (bw * bh) > (w * h * 0.75):
+                                continue
+
+                            # Map detector classes from the multiclass civic dataset.
+                            mapped_category = "Pothole"
+                            if cls_name.lower() in ["crack", "road_crack"]:
+                                mapped_category = "Road Crack"
+                            elif cls_name.lower() in ["damage", "road_damage"]:
+                                mapped_category = "Road Damage"
+                            elif cls_name.lower() in ["garbage", "garbage_overflow", "trash", "waste"]:
+                                mapped_category = "Garbage Overflow"
+                            elif cls_name.lower() in ["water_leakage", "water_leak", "leakage", "pipe_leak"]:
+                                mapped_category = "Water Leakage"
+                            elif cls_name.lower() in ["streetlight", "street_light", "broken_streetlight"]:
+                                mapped_category = "Broken Streetlight"
+
+                            candidate_boxes.append({
+                                "class_name": mapped_category,
+                                "confidence": round(conf, 3),
+                                "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
+                                "area": bw * bh
+                            })
             except Exception as e:
-                print(f"[Inference Error] YOLO inference warning: {e}")
+                print(f"[Inference Error] Model inference warning: {e}")
 
-        # If zero detections were found via generic YOLO model (e.g. COCO weights without pothole class),
-        # apply contour/texture road defect analyzer to provide reliable real-time road cavity detection
-        if len(detections) == 0:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Focus on lower two-thirds of the image (the road surface)
-            road_roi = gray[int(h * 0.35):h, :]
-            # Adaptive thresholding to identify darker cavity / pothole depressions
-            blurred = cv2.GaussianBlur(road_roi, (9, 9), 0)
-            thresh = cv2.adaptiveThreshold(
-                blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
-            )
-            # Morphological closing
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-            closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 2. Heuristic cavity & texture fallback if neural detector found no boxes in the road frame
+        if len(candidate_boxes) == 0:
+            try:
+                hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                road_mask = np.zeros((h, w), dtype=np.uint8)
+                road_mask[int(h * 0.14):, :] = 255
 
-            valid_potholes = []
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if 800 < area < (w * h * 0.25):  # Sensible cavity size filter
-                    x, y, cw, ch = cv2.boundingRect(cnt)
-                    aspect_ratio = float(cw) / max(ch, 1)
-                    if 0.5 < aspect_ratio < 3.0:
-                        real_y = y + int(h * 0.35)
-                        valid_potholes.append((x, real_y, x + cw, real_y + ch, area))
+                puddle_mask = ((hsv[:,:,0] >= 10) & (hsv[:,:,0] <= 36) & 
+                               (hsv[:,:,1] >= 12) & (hsv[:,:,1] <= 65) & 
+                               (hsv[:,:,2] >= 90) & (hsv[:,:,2] <= 195)).astype(np.uint8) * 255
+                puddle_mask = cv2.bitwise_and(puddle_mask, road_mask)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+                closed = cv2.morphologyEx(puddle_mask, cv2.MORPH_CLOSE, kernel)
+                contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            if valid_potholes:
-                # Pick the most prominent cavity
-                valid_potholes.sort(key=lambda item: item[4], reverse=True)
-                top = valid_potholes[0]
-                area_ratio = top[4] / (w * h)
-                calc_conf = min(0.96, max(0.65, 0.70 + (area_ratio * 1.5)))
-                detections.append({
-                    "class_name": "Pothole",
-                    "confidence": round(calc_conf, 3),
-                    "bbox": [float(top[0]), float(top[1]), float(top[2]), float(top[3])],
-                    "normalized_bbox": [
-                        round(top[0] / w, 3),
-                        round(top[1] / h, 3),
-                        round(top[2] / w, 3),
-                        round(top[3] / h, 3)
-                    ]
-                })
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if area > (w * h * 0.008):
+                        x, y, cw, ch = cv2.boundingRect(cnt)
+                        ratio = cw / max(1, ch)
+                        if 0.4 <= ratio <= 3.2 and cw < (w * 0.85) and ch < (h * 0.85):
+                            pad = int(min(cw, ch) * 0.14)
+                            x1 = max(0.0, float(x - pad))
+                            y1 = max(float(h * 0.14), float(y - pad))
+                            x2 = min(float(w), float(x + cw + pad))
+                            y2 = min(float(h), float(y + ch + pad))
+                            calc_conf = min(0.95, max(0.72, 0.75 + (area / (w * h) * 1.5)))
+                            candidate_boxes.append({
+                                "class_name": "Pothole",
+                                "confidence": round(calc_conf, 3),
+                                "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
+                                "area": (x2 - x1) * (y2 - y1)
+                            })
+            except Exception as e:
+                print(f"[Cavity Detector Notice] {e}")
+
+            # 3. CLAHE Contour Texture Fallback if still empty and model is None
+            if len(candidate_boxes) == 0:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                roi_y_start = int(h * 0.20)
+                road_roi = gray[roi_y_start:h, :]
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                enhanced_roi = clahe.apply(road_roi)
+                blurred = cv2.GaussianBlur(enhanced_roi, (5, 5), 0)
+                thresh_dark = cv2.adaptiveThreshold(
+                    blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
+                )
+                edges = cv2.Canny(blurred, 25, 80)
+                combined_mask = cv2.bitwise_or(thresh_dark, edges)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                closed = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+                contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                min_area = max(180, int(w * h * 0.002))
+                max_area = int(w * h * 0.50)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if min_area < area < max_area:
+                        x, y, cw, ch = cv2.boundingRect(cnt)
+                        aspect_ratio = float(cw) / max(ch, 1)
+                        if 0.30 < aspect_ratio < 4.5:
+                            real_y = y + roi_y_start
+                            area_ratio = area / (w * h)
+                            calc_conf = min(0.95, max(0.65, 0.70 + (area_ratio * 1.5)))
+                            candidate_boxes.append({
+                                "class_name": "Pothole",
+                                "confidence": round(calc_conf, 3),
+                                "bbox": [float(x), float(real_y), float(x + cw), float(real_y + ch)],
+                                "area": area
+                            })
+
+        # 4. Sort and apply NMS deduplication to guarantee tight, non-overlapping bounding boxes
+        candidate_boxes.sort(key=lambda item: item["confidence"], reverse=True)
+        final_kept = []
+        for cand in candidate_boxes:
+            b1 = cand["bbox"]
+            overlap = False
+            for kept in final_kept:
+                b2 = kept["bbox"]
+                ix1 = max(b1[0], b2[0])
+                iy1 = max(b1[1], b2[1])
+                ix2 = min(b1[2], b2[2])
+                iy2 = min(b1[3], b2[3])
+                iw = max(0.0, ix2 - ix1)
+                ih = max(0.0, iy2 - iy1)
+                inter = iw * ih
+                union = (b1[2]-b1[0])*(b1[3]-b1[1]) + (b2[2]-b2[0])*(b2[3]-b2[1]) - inter
+                iou = inter / max(1e-6, union)
+                if iou > 0.25:
+                    overlap = True
+                    break
+            if not overlap:
+                final_kept.append(cand)
+                if len(final_kept) >= 6:
+                    break
+
+        for det in final_kept:
+            b = det["bbox"]
+            det["normalized_bbox"] = [
+                round(b[0] / w, 4),
+                round(b[1] / h, 4),
+                round(b[2] / w, 4),
+                round(b[3] / h, 4)
+            ]
+            detections.append(det)
 
         # Calculate dominant category and overall confidence
         if detections:
@@ -180,8 +270,10 @@ class ComputerVisionService:
             detected_category = primary["class_name"]
             confidence = primary["confidence"]
         else:
-            detected_category = "Road Damage"
-            confidence = 0.55
+            # Do not turn an image with no supported road-defect detection into
+            # a false Road Damage report. Let the citizen choose another category.
+            detected_category = "Other"
+            confidence = 0.35
 
         # Compute physical defect dimensions and road area ratios
         total_defect_area_ratio = 0.0
@@ -218,6 +310,12 @@ class ComputerVisionService:
             severity_reason = (
                 f"MEDIUM: Moderate road defect covering {area_pct}% of visible road surface. "
                 f"Requires vehicular deceleration; risks wheel misalignment and tire sidewall impact at normal speed."
+            )
+        elif detected_category == "Other":
+            suggested_severity = "LOW"
+            severity_reason = (
+                "LOW: No supported road defect was detected with enough confidence. "
+                "Please review the image and choose the correct civic issue category."
             )
         else:
             suggested_severity = "LOW"

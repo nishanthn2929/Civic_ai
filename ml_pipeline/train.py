@@ -13,21 +13,21 @@ if not hasattr(np, "trapz"):
         np.trapz = scipy.integrate.trapezoid
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Bengaluru Civic AI: Road Damage & Pothole Model Training Pipeline")
+    parser = argparse.ArgumentParser(description="Bengaluru Civic AI: RT-DETR multiclass civic issue training pipeline")
     parser.add_argument("--data", type=str, default="ml_pipeline/coco_dataset/data.yaml", help="Path to dataset data.yaml")
     parser.add_argument("--epochs", type=int, default=12, help="Number of training epochs")
     parser.add_argument("--batch", type=int, default=8, help="Batch size")
     parser.add_argument("--imgsz", type=int, default=416, help="Image resolution")
-    parser.add_argument("--weights", type=str, default="yolov8n.pt", help="Pretrained weights")
+    parser.add_argument("--weights", type=str, default="rtdetr-l.pt", help="RT-DETR pretrained weights")
     parser.add_argument("--project", type=str, default="ml_pipeline/runs", help="Output directory")
-    parser.add_argument("--name", type=str, default="pothole_yolov8_run", help="Run name")
+    parser.add_argument("--name", type=str, default="civic_multiclass_rtdetr_run", help="Run name")
     parser.add_argument("--export", action="store_true", default=True, help="Export to ONNX after training")
     return parser.parse_args()
 
 def train():
     args = parse_args()
     print("==================================================================")
-    print("   CIVIC AI: ROAD DAMAGE & POTHOLE MODEL TRAINING PIPELINE")
+    print("   CIVIC AI: RT-DETR MULTICLASS CIVIC ISSUE TRAINING PIPELINE")
     print("==================================================================")
     print(f"Dataset:    {args.data}")
     print(f"Weights:    {args.weights}")
@@ -40,14 +40,39 @@ def train():
         print(f"Error: Dataset yaml not found at {args.data}")
         sys.exit(1)
 
+    required_categories = {
+        "pothole",
+        "road_damage",
+        "road_crack",
+        "garbage_overflow",
+        "water_leakage",
+        "broken_streetlight",
+    }
     try:
-        from ultralytics import YOLO
+        import yaml
+        with data_path.open("r", encoding="utf-8") as data_file:
+            dataset_config = yaml.safe_load(data_file) or {}
+        class_names = {str(name).lower().replace(" ", "_") for name in dataset_config.get("names", {}).values()}
+        missing_categories = required_categories - class_names
+        if missing_categories:
+            print(
+                "Error: multiclass training requires labeled classes: "
+                + ", ".join(sorted(missing_categories))
+            )
+            print("Add matching images and YOLO labels before starting training.")
+            sys.exit(1)
+    except ImportError:
+        print("Error: PyYAML is required to validate dataset classes.")
+        sys.exit(1)
+
+    try:
+        from ultralytics import RTDETR
     except ImportError:
         print("Error: ultralytics package is required for training.")
         sys.exit(1)
 
-    print("\n[Step 1/4] Initializing base YOLOv8 architecture from pretrained weights...")
-    model = YOLO(args.weights)
+    print("\n[Step 1/4] Initializing RT-DETR architecture from pretrained weights...")
+    model = RTDETR(args.weights)
 
     print("\n[Step 2/4] Starting training loop with road surface augmentations...")
     results = model.train(
@@ -89,17 +114,17 @@ def train():
     # Save best weights to canonical target paths
     best_weights_src = Path(args.project) / args.name / "weights" / "best.pt"
     if best_weights_src.exists():
-        # Destination 1: ml_pipeline/weights/pothole_best.pt
+        # Destination 1: canonical multiclass weights for backend inference.
         weights_dir = Path("ml_pipeline/weights")
         weights_dir.mkdir(parents=True, exist_ok=True)
-        dest1 = weights_dir / "pothole_best.pt"
+        dest1 = weights_dir / "civic_multiclass_rtdetr_best.pt"
         shutil.copy(best_weights_src, dest1)
         print(f"\nSaved best weights to: {dest1}")
 
-        # Destination 2: backend/data/yolov8_pothole_best.pt (for backend live inference)
+        # Destination 2: backend/data/rtdetr_pothole_best.pt (for backend live inference)
         backend_data = Path("backend/data")
         backend_data.mkdir(parents=True, exist_ok=True)
-        dest2 = backend_data / "yolov8_pothole_best.pt"
+        dest2 = backend_data / "civic_multiclass_rtdetr_best.pt"
         shutil.copy(best_weights_src, dest2)
         print(f"Copied weights to backend for live inference: {dest2}")
 
@@ -111,7 +136,7 @@ def train():
         except Exception as e:
             print(f"ONNX export note: {e}")
 
-    print("\n[Success] Pothole model trained, verified, and integrated successfully!")
+    print("\n[Success] RT-DETR multiclass civic issue model trained and integrated successfully!")
 
 if __name__ == "__main__":
     train()

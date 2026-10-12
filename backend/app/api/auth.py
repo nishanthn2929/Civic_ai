@@ -1,9 +1,10 @@
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.core.security import get_password_hash, verify_password, create_access_token
 from backend.app.models.models import User, UserRole, AuditLog
-from backend.app.schemas.schemas import UserCreate, UserLogin, UserOut, Token
+from backend.app.schemas.schemas import UserCreate, UserLogin, GoogleLoginRequest, UserOut, Token
 from backend.app.api.deps import get_current_active_user
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -56,6 +57,45 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         )
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account is disabled.")
+
+    token = create_access_token(subject=user.id, role=user.role)
+    return Token(access_token=token, token_type="bearer", user=UserOut.model_validate(user))
+
+@router.post("/google", response_model=Token)
+def google_login(login_data: GoogleLoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == login_data.email).first()
+    if not user:
+        req_role = (login_data.role or "citizen").lower()
+        if req_role not in [UserRole.CITIZEN.value, UserRole.AUTHORITY.value, UserRole.ADMIN.value]:
+            req_role = UserRole.CITIZEN.value
+            
+        display_name = login_data.name or login_data.email.split("@")[0].replace(".", " ").title()
+        import uuid
+        user = User(
+            name=display_name,
+            email=login_data.email,
+            hashed_password=get_password_hash(uuid.uuid4().hex),
+            role=req_role,
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        audit = AuditLog(
+            user_id=user.id,
+            action="USER_REGISTERED_GOOGLE",
+            entity_type="user",
+            entity_id=user.id
+        )
+        db.add(audit)
+        db.commit()
+    else:
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account is disabled.")
+        if login_data.name and not user.name:
+            user.name = login_data.name
+            db.commit()
 
     token = create_access_token(subject=user.id, role=user.role)
     return Token(access_token=token, token_type="bearer", user=UserOut.model_validate(user))

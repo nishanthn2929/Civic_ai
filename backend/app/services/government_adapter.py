@@ -1,69 +1,202 @@
-from datetime import datetime, timezone
+import logging
+import os
 from typing import Dict, Any, Optional
-from backend.app.models.models import Incident
+from datetime import datetime, timezone
 from backend.app.core.config import settings
 
-class GovernmentAdapter:
+logger = logging.getLogger("GovernmentReportingAdapter")
+
+class GovernmentReportingAdapter:
     """
-    Modular integration adapter adhering to strict ethics:
-    Never scrape or automate login to unauthorized portals.
-    1. Authorized API integration (if official credentials provided).
-    2. Citizen-assisted handoff package generation when direct API access is absent.
+    Official Government Integration Adapter for BBMP Sahaya & Civic Helplines.
+    
+    Strict Operational Rules:
+    1. ONLY submit when valid government API credentials and endpoint are officially configured.
+    2. NEVER fake an API response or generate fake complaint tracking IDs.
+    3. If official API is not configured or disabled:
+       Set report status to 'READY_FOR_OFFICIAL_SUBMISSION' / 'VERIFIED_PENDING_OFFICIAL_SUBMISSION'.
+    4. Provide clear user-facing explanation:
+       "Verified incident created. Official submission is pending because the government reporting API is not configured."
     """
 
     def __init__(self):
-        self.api_endpoint = settings.GOVT_API_ENDPOINT
-        self.api_key = settings.GOVT_API_KEY
-        self.is_enabled = settings.GOVT_INTEGRATION_ENABLED
+        self.api_url = getattr(settings, "BBMP_API_BASE_URL", None) or getattr(settings, "GOVT_API_ENDPOINT", None)
+        self.api_key = getattr(settings, "BBMP_API_KEY", None) or getattr(settings, "GOVT_API_KEY", None)
+        self.auto_submit = getattr(settings, "BBMP_AUTO_SUBMIT_ENABLED", False) or getattr(settings, "GOVT_INTEGRATION_ENABLED", False)
 
-    def submit_incident_to_government(self, incident: Incident) -> Dict[str, Any]:
-        """Submit incident to authorized BBMP / Government API if enabled."""
-        if not self.is_enabled:
+    def is_configured(self) -> bool:
+        """Check whether genuine government submission credentials are configured."""
+        if not self.auto_submit:
+            return False
+        if not self.api_url or not self.api_key:
+            return False
+        if "mock" in self.api_url.lower() or "mock" in self.api_key.lower():
+            # Mock or dummy credentials should not claim official government submission
+            return False
+        return True
+
+    def create_complaint(self, incident_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a complaint in the official municipal system.
+        If no authorized official API is configured, return pending status with complete technical dossier.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        if not self.is_configured():
+            logger.info("[GovernmentReportingAdapter] Official submission held: API not configured with live credentials.")
             return {
-                "success": False,
-                "status": "UNAUTHORIZED_OR_DISABLED",
-                "message": "Official Government API integration is currently disabled or pending authorization."
+                "submission_status": "READY_FOR_OFFICIAL_SUBMISSION",
+                "is_submitted": False,
+                "official_complaint_id": None,
+                "message": "Verified incident created. Official submission is pending because the government reporting API is not configured.",
+                "primary_authority": "BBMP Ward Office / Road Infrastructure Division",
+                "ward_number": incident_data.get("ward_number"),
+                "ward_name": incident_data.get("ward_name"),
+                "assembly_constituency": incident_data.get("assembly_constituency"),
+                "mla_name": incident_data.get("mla_name"),
+                "parliamentary_constituency": incident_data.get("parliamentary_constituency"),
+                "mp_name": incident_data.get("mp_name"),
+                "timestamp": now,
+                "dossier_package": {
+                    "incident_code": incident_data.get("incident_code"),
+                    "category": incident_data.get("category", "POTHOLE"),
+                    "latitude": incident_data.get("latitude"),
+                    "longitude": incident_data.get("longitude"),
+                    "gps_accuracy": incident_data.get("gps_accuracy"),
+                    "evidence_url": incident_data.get("primary_media_url"),
+                    "priority_score": incident_data.get("priority_score"),
+                    "bbmp_helpline": "1533"
+                }
             }
 
-        # Simulated response from an authorized municipal API
-        simulated_complaint_id = f"BBMP-GRV-2026-{incident.id:05d}"
-        return {
-            "success": True,
-            "external_complaint_id": simulated_complaint_id,
-            "status": "ACKNOWLEDGED",
-            "department": incident.department.name if incident.department else "BBMP Central",
-            "submitted_at": datetime.now(timezone.utc).isoformat()
-        }
+        # If live credentials exist, send to official government API
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            res = requests.post(f"{self.api_url}/complaints", json=incident_data, headers=headers, timeout=10)
+            if res.status_code in [200, 201]:
+                res_json = res.json()
+                return {
+                    "submission_status": "OFFICIALLY_SUBMITTED",
+                    "is_submitted": True,
+                    "official_complaint_id": res_json.get("complaint_id"),
+                    "message": f"Successfully submitted to official BBMP system. Tracking ID: {res_json.get('complaint_id')}",
+                    "timestamp": now
+                }
+            else:
+                return {
+                    "submission_status": "OFFICIAL_API_ERROR",
+                    "is_submitted": False,
+                    "official_complaint_id": None,
+                    "message": f"Official government API returned status {res.status_code}.",
+                    "timestamp": now
+                }
+        except Exception as e:
+            logger.error(f"[GovernmentReportingAdapter] Failed to transmit to official API: {e}")
+            return {
+                "submission_status": "OFFICIAL_API_UNAVAILABLE",
+                "is_submitted": False,
+                "official_complaint_id": None,
+                "message": f"Government reporting endpoint unreachable: {str(e)}",
+                "timestamp": now
+            }
 
-    def generate_citizen_handoff_package(self, incident: Incident) -> Dict[str, Any]:
-        """
-        Produce a formatted official grievance dossier for the citizen to present
-        or submit to BBMP Sahaya / 1533 helpline.
-        """
-        ward_name = incident.ward.ward_name if incident.ward else "Bengaluru Urban"
-        zone_name = incident.ward.zone_name if incident.ward else "BBMP Zone"
-        dept_name = incident.department.name if incident.department else "BBMP Infrastructure"
+    def get_complaint_status(self, complaint_id: str) -> Dict[str, Any]:
+        """Fetch tracking status of a previously submitted complaint."""
+        if not self.is_configured():
+            return {
+                "complaint_id": complaint_id,
+                "status": "LOCAL_VERIFIED",
+                "message": "Live government sync unavailable without authorized API access."
+            }
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            res = requests.get(f"{self.api_url}/complaints/{complaint_id}", headers=headers, timeout=5)
+            if res.status_code == 200:
+                return res.json()
+        except Exception as e:
+            logger.error(f"Failed to check complaint status: {e}")
+        return {"complaint_id": complaint_id, "status": "UNKNOWN"}
 
-        dossier_text = (
-            f"OFFICIAL CIVIC COMPLAINT SUMMARY\n"
-            f"Reference Code: {incident.incident_code}\n"
-            f"Issue Type: {incident.category}\n"
-            f"BBMP Ward: {ward_name} (Zone: {zone_name})\n"
-            f"Location: Lat {incident.latitude:.6f}, Lng {incident.longitude:.6f}\n"
-            f"Assigned Municipal Dept: {dept_name}\n"
-            f"Calculated Severity: {incident.severity}\n"
-            f"Number of Confirming Citizen Reports: {incident.reports_count}\n"
-            f"Reported Timestamp: {incident.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-            f"Description: {incident.description or incident.title}\n"
-        )
+    def upload_evidence(self, complaint_id: str, file_path: str) -> Dict[str, Any]:
+        """Upload photo/video evidence to official complaint record."""
+        if not self.is_configured():
+            return {"status": "SKIPPED", "message": "Evidence preserved locally in media storage."}
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            with open(file_path, "rb") as f:
+                res = requests.post(
+                    f"{self.api_url}/complaints/{complaint_id}/evidence",
+                    files={"file": f},
+                    headers=headers,
+                    timeout=15
+                )
+            return res.json() if res.status_code == 200 else {"status": "FAILED"}
+        except Exception as e:
+            return {"status": "ERROR", "error": str(e)}
 
-        return {
+    def update_complaint(self, complaint_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing complaint record."""
+        if not self.is_configured():
+            return {"status": "SKIPPED", "message": "Official API not configured."}
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            res = requests.patch(f"{self.api_url}/complaints/{complaint_id}", json=update_data, headers=headers, timeout=5)
+            return res.json() if res.status_code == 200 else {"status": "FAILED"}
+        except Exception as e:
+            return {"status": "ERROR", "error": str(e)}
+
+    def submit_incident_to_government(self, incident: Any) -> Dict[str, Any]:
+        """Backwards compatibility helper for admin handoff."""
+        return self.create_complaint({
             "incident_code": incident.incident_code,
-            "formatted_dossier": dossier_text,
-            "official_portal_url": "https://site.bbmp.gov.in/sahaya.html",
+            "category": incident.category,
+            "latitude": incident.latitude,
+            "longitude": incident.longitude,
+            "gps_accuracy": getattr(incident, "gps_accuracy", None),
+            "ward_number": getattr(incident, "ward_number", None),
+            "ward_name": getattr(incident, "ward_name", None),
+            "assembly_constituency": getattr(incident, "assembly_constituency_name", None),
+            "mla_name": getattr(incident, "mla_name", None),
+            "parliamentary_constituency": getattr(incident, "parliamentary_constituency_name", None),
+            "mp_name": getattr(incident, "mp_name", None),
+            "primary_media_url": getattr(incident, "primary_media_url", None),
+            "priority_score": getattr(incident, "priority_score", 50.0)
+        })
+
+    def generate_citizen_handoff_package(self, incident: Any) -> Dict[str, Any]:
+        """Generate citizen dossier formatted for BBMP Sahaya 1533 helpline."""
+        dossier = (
+            f"BBMP CIVIC GRIEVANCE TECHNICAL DOSSIER\n"
+            f"Incident Code: {incident.incident_code}\n"
+            f"Category: {incident.category}\n"
+            f"GPS Coordinates: {incident.latitude:.6f}, {incident.longitude:.6f}\n"
+            f"Ward: #{getattr(incident, 'ward_number', 'N/A')} - {getattr(incident, 'ward_name', 'Bengaluru')}\n"
+            f"Assembly: {getattr(incident, 'assembly_constituency_name', 'N/A')}\n"
+            f"MLA: {getattr(incident, 'mla_name', 'N/A')}\n"
+            f"Parliament: {getattr(incident, 'parliamentary_constituency_name', 'N/A')}\n"
+            f"MP: {getattr(incident, 'mp_name', 'N/A')}\n"
+            f"Severity: {incident.severity}\n"
+            f"Priority Score: {incident.priority_score}\n"
+            f"Timestamp: {incident.created_at.isoformat() if incident.created_at else 'N/A'}\n"
+            f"BBMP 24x7 Helpline: 1533\n"
+            f"BBMP Sahaya Portal: https://bbmp.gov.in"
+        )
+        return {
+            "incident_id": incident.id,
+            "incident_code": incident.incident_code,
+            "mode": "CITIZEN_ASSISTED_HANDOFF",
+            "formatted_dossier": dossier,
             "bbmp_helpline": "1533",
-            "evidence_image": incident.primary_media_url,
-            "instructions": "Copy this verified technical dossier to log directly into BBMP Sahaya app or present to your ward corporator/engineer."
+            "official_portal_url": "https://bbmp.gov.in",
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
-govt_adapter = GovernmentAdapter()
+government_adapter = GovernmentReportingAdapter()
+govt_adapter = government_adapter

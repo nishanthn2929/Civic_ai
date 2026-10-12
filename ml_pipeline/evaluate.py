@@ -13,7 +13,7 @@ if not hasattr(np, "trapz"):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Road Defect & Pothole Detection Model")
-    parser.add_argument("--weights", type=str, default="ml_pipeline/weights/pothole_best.pt", help="Trained model weights")
+    parser.add_argument("--weights", type=str, default="ml_pipeline/weights/rtdetr_pothole_best.pt", help="Trained RT-DETR model weights")
     parser.add_argument("--data", type=str, default="ml_pipeline/coco_dataset/data.yaml", help="Path to data.yaml")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--iou", type=float, default=0.50, help="NMS IoU threshold")
@@ -26,12 +26,12 @@ def evaluate():
     print("==================================================================")
     
     try:
-        from ultralytics import YOLO
+        from ultralytics import RTDETR
     except ImportError:
         print("Error: ultralytics package is required.")
         sys.exit(1)
 
-    model = YOLO(args.weights)
+    model = RTDETR(args.weights)
     print(f"Loaded Weights: {args.weights}")
     print(f"Testing Dataset: {args.data}")
     print(f"Confidence Threshold: {args.conf}")

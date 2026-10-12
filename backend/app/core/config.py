@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     GOVT_API_KEY: str = "mock-bbmp-api-key-secure"
     GOVT_MODE: str = "OFFICIAL_API_AND_HANDOFF"  # "OFFICIAL_API" or "CITIZEN_HANDOFF"
 
+    # Real AI assistant provider. Keep the key server-side; never expose it in Vite.
+    AI_PROVIDER: str = "google"
+    AI_API_KEY: str = ""
+    AI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_MODEL: str = "gemini-3.6-flash"
+
     # Bengaluru GIS
     BLR_CENTER_LAT: float = 12.9716
     BLR_CENTER_LNG: float = 77.5946

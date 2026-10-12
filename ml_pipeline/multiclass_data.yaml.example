@@ -1,0 +1,15 @@
+# Copy this file to a real dataset directory as data.yaml after adding
+# YOLO images and labels for every class below.
+path: C:/path/to/civic_multiclass_dataset
+train: train/images
+val: val/images
+test: test/images
+
+nc: 6
+names:
+  0: pothole
+  1: road_damage
+  2: road_crack
+  3: garbage_overflow
+  4: water_leakage
+  5: broken_streetlight

@@ -10,8 +10,14 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, Point
 from shapely.validation import explain_validity, make_valid
-import pyproj
-from pyproj import Transformer
+try:
+    import pyproj
+    from pyproj import Transformer
+    HAS_PYPROJ = True
+except (ImportError, Exception):
+    pyproj = None
+    Transformer = None
+    HAS_PYPROJ = False
 import shapefile  # pyshp
 
 from backend.app.core.config import settings, BASE_DIR
@@ -195,12 +201,13 @@ class BBMPWardImporter:
                 raw_crs = "EPSG:4326"
             elif crs_str:
                 raw_crs = crs_str
-                try:
-                    src_proj = pyproj.CRS.from_string(crs_str)
-                    if src_proj.to_epsg() != 4326:
-                        transformer = Transformer.from_crs(src_proj, "EPSG:4326", always_xy=True)
-                except Exception:
-                    pass
+                if HAS_PYPROJ:
+                    try:
+                        src_proj = pyproj.CRS.from_string(crs_str)
+                        if src_proj.to_epsg() != 4326:
+                            transformer = Transformer.from_crs(src_proj, "EPSG:4326", always_xy=True)
+                    except Exception:
+                        pass
 
         raw_features = data.get("features", [])
         features = []
@@ -290,13 +297,14 @@ class BBMPWardImporter:
             if prj_files:
                 with open(prj_files[0], "r", encoding="utf-8", errors="ignore") as pf:
                     prj_wkt = pf.read().strip()
-                try:
-                    src_crs = pyproj.CRS.from_wkt(prj_wkt)
-                    crs_name = src_crs.to_string()
-                    if src_crs.to_epsg() != 4326:
-                        transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
-                except Exception:
-                    crs_name = "Unspecified PRJ (Assumed EPSG:4326)"
+                if HAS_PYPROJ:
+                    try:
+                        src_crs = pyproj.CRS.from_wkt(prj_wkt)
+                        crs_name = src_crs.to_string()
+                        if src_crs.to_epsg() != 4326:
+                            transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
+                    except Exception:
+                        crs_name = "Unspecified PRJ (Assumed EPSG:4326)"
 
             # Read shapefile records
             sf = shapefile.Reader(str(shp_file))

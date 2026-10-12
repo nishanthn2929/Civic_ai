@@ -1,3 +1,4 @@
+
 import io
 import json
 import os
@@ -62,7 +63,7 @@ def prepare_real_dataset():
             except KeyError:
                 continue
 
-            # Generate YOLO formatted label text file (.txt)
+            # Generate Ultralytics detector label text file (.txt)
             label_filename = Path(file_name).stem + ".txt"
             label_path = labels_dir / label_filename
 
@@ -72,7 +73,7 @@ def prepare_real_dataset():
                     # COCO bbox: [x_min, y_min, width, height]
                     bx, by, bw, bh = ann["bbox"]
                     
-                    # Convert to normalized YOLO: [x_center, y_center, w, h]
+                    # Convert to normalized detector format: [x_center, y_center, w, h]
                     x_center = (bx + (bw / 2.0)) / img_width
                     y_center = (by + (bh / 2.0)) / img_height
                     norm_w = bw / img_width
@@ -107,7 +108,7 @@ names:
     with open(base_dir / "data.yaml", "w", encoding="utf-8") as f:
         f.write(yaml_content)
 
-    print(f"\n[Complete] Verified YOLO road pothole dataset created at: {base_dir}")
+    print(f"\n[Complete] Verified RT-DETR road pothole dataset created at: {base_dir}")
     print("data.yaml successfully configured.")
 
 if __name__ == "__main__":

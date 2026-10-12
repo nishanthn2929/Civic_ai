@@ -108,20 +108,50 @@ class Report(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     gps_accuracy = Column(Float, nullable=True)  # Captured in meters
-    location_source = Column(String(50), default="GPS")  # GPS or MANUAL
+    location_source = Column(String(50), default="GPS")  # GPS, DEVICE_GPS, EXIF, or MANUAL
+    location_timestamp = Column(DateTime, nullable=True)
+    photo_latitude = Column(Float, nullable=True)
+    photo_longitude = Column(Float, nullable=True)
+    photo_gps_available = Column(Boolean, default=False)
+    photo_gps_source = Column(String(50), nullable=True)  # EXIF or NONE
+    photo_altitude = Column(Float, nullable=True)
+    photo_timestamp = Column(String(50), nullable=True)
     ward_number = Column(Integer, nullable=True)
     ward_name = Column(String(150), nullable=True)
     ward_detection_method = Column(String(50), default="POINT_IN_POLYGON")  # POINT_IN_POLYGON or OUTSIDE_BBMP
+    assembly_constituency_number = Column(Integer, nullable=True)
+    assembly_constituency_name = Column(String(100), nullable=True)
+    mla_name = Column(String(100), nullable=True)
+    mla_party = Column(String(50), nullable=True)
+    mla_source = Column(String(200), nullable=True)
+    mla_last_verified = Column(DateTime, nullable=True)
+    parliamentary_constituency_number = Column(Integer, nullable=True)
+    parliamentary_constituency_name = Column(String(100), nullable=True)
+    mp_name = Column(String(100), nullable=True)
+    mp_party = Column(String(50), nullable=True)
+    mp_source = Column(String(200), nullable=True)
+    mp_last_verified = Column(DateTime, nullable=True)
+    boundary_warning = Column(Boolean, default=False)
     address = Column(String(255), nullable=True)
     ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
     quality_score = Column(Float, default=1.0)
     status = Column(String(20), default=ReportStatus.SUBMITTED.value)
     created_at = Column(DateTime, default=utcnow)
+    # Duplicate civic issue detection fields
+    is_duplicate = Column(Boolean, default=False)
+    duplicate_status = Column(String(50), default="NONE")  # NONE, CONFIRMED_DUPLICATE, POSSIBLE_DUPLICATE, USER_CONFIRMED, USER_REJECTED
+    duplicate_score = Column(Float, nullable=True)
+    duplicate_signals = Column(Text, nullable=True)  # JSON string of signal breakdown
+    primary_report_id = Column(Integer, ForeignKey("reports.id"), nullable=True)
+    duplicate_group_id = Column(String(100), nullable=True)
+    image_embedding = Column(Text, nullable=True)
+    text_embedding = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="reports")
     ward = relationship("Ward", back_populates="reports")
     incident = relationship("Incident", back_populates="reports")
+    primary_report = relationship("Report", remote_side=[id], foreign_keys=[primary_report_id], backref="duplicate_reports")
     media = relationship("ReportMedia", back_populates="report", cascade="all, delete-orphan")
     ai_detections = relationship("AIDetection", back_populates="report", cascade="all, delete-orphan")
     voice_detail = relationship("VoiceReport", back_populates="report", uselist=False, cascade="all, delete-orphan")
@@ -174,9 +204,29 @@ class Incident(Base):
     longitude = Column(Float, nullable=False)
     gps_accuracy = Column(Float, nullable=True)
     location_source = Column(String(50), default="GPS")
+    location_timestamp = Column(DateTime, nullable=True)
+    photo_latitude = Column(Float, nullable=True)
+    photo_longitude = Column(Float, nullable=True)
+    photo_gps_available = Column(Boolean, default=False)
+    photo_gps_source = Column(String(50), nullable=True)
+    photo_altitude = Column(Float, nullable=True)
+    photo_timestamp = Column(String(50), nullable=True)
     ward_number = Column(Integer, nullable=True)
     ward_name = Column(String(150), nullable=True)
     ward_detection_method = Column(String(50), default="POINT_IN_POLYGON")
+    assembly_constituency_number = Column(Integer, nullable=True)
+    assembly_constituency_name = Column(String(100), nullable=True)
+    mla_name = Column(String(100), nullable=True)
+    mla_party = Column(String(50), nullable=True)
+    mla_source = Column(String(200), nullable=True)
+    mla_last_verified = Column(DateTime, nullable=True)
+    parliamentary_constituency_number = Column(Integer, nullable=True)
+    parliamentary_constituency_name = Column(String(100), nullable=True)
+    mp_name = Column(String(100), nullable=True)
+    mp_party = Column(String(50), nullable=True)
+    mp_source = Column(String(200), nullable=True)
+    mp_last_verified = Column(DateTime, nullable=True)
+    boundary_warning = Column(Boolean, default=False)
     address = Column(String(255), nullable=True)
     ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
@@ -184,6 +234,9 @@ class Incident(Base):
     
     reports_count = Column(Integer, default=1)
     primary_media_url = Column(String(255), nullable=True)
+    duplicate_count = Column(Integer, default=0)
+    duplicate_group_id = Column(String(100), nullable=True)
+    has_duplicates = Column(Boolean, default=False)
     
     # Government integration reference (only set if authorized or handoff generated)
     govt_complaint_id = Column(String(100), nullable=True)
@@ -375,4 +428,77 @@ class BBMPWardDataset(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+# Authoritative Assembly Constituencies (Requirement 13)
+class AssemblyConstituency(Base):
+    __tablename__ = "assembly_constituencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    constituency_number = Column(Integer, unique=True, index=True, nullable=False)
+    constituency_name = Column(String(100), unique=True, index=True, nullable=False)
+    state = Column(String(50), default="Karnataka")
+    district = Column(String(50), default="Bengaluru Urban")
+    geometry = Column(Text, nullable=False)  # GeoJSON Polygon / MultiPolygon string
+    source = Column(String(200), default="CEO Karnataka / Election Commission of India")
+    source_url = Column(String(300), default="https://kla.kar.nic.in/")
+    dataset_version = Column(String(50), default="ECI-KLA-2023")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    mla = relationship("MLA", back_populates="constituency", uselist=False, cascade="all, delete-orphan")
+
+# Members of Legislative Assembly (MLAs) Master Data (Requirement 14 & 16)
+class MLA(Base):
+    __tablename__ = "mlas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    assembly_constituency_id = Column(Integer, ForeignKey("assembly_constituencies.id"), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    party = Column(String(50), nullable=False)
+    term = Column(String(50), default="2023-2028")
+    official_profile_url = Column(String(255), nullable=True)
+    contact_email = Column(String(120), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    source = Column(String(200), default="Karnataka Legislative Assembly (16th KLA)")
+    last_verified = Column(DateTime, default=utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    constituency = relationship("AssemblyConstituency", back_populates="mla")
+
+# Authoritative Parliamentary Constituencies (Lok Sabha)
+class ParliamentaryConstituency(Base):
+    __tablename__ = "parliamentary_constituencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    constituency_number = Column(Integer, unique=True, index=True, nullable=False)
+    constituency_name = Column(String(100), unique=True, index=True, nullable=False)
+    state = Column(String(50), default="Karnataka")
+    geometry = Column(Text, nullable=False)  # GeoJSON Polygon / MultiPolygon string
+    source = Column(String(200), default="Election Commission of India / Lok Sabha Secretariat")
+    source_url = Column(String(300), default="https://sansad.in/ls/members")
+    dataset_version = Column(String(50), default="ECI-LS-2024")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    mp = relationship("MP", back_populates="constituency", uselist=False, cascade="all, delete-orphan")
+
+# Members of Parliament (Lok Sabha MPs) Master Data
+class MP(Base):
+    __tablename__ = "mps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parliamentary_constituency_id = Column(Integer, ForeignKey("parliamentary_constituencies.id"), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    party = Column(String(50), nullable=False)
+    term = Column(String(50), default="2024-2029")
+    official_profile_url = Column(String(255), nullable=True)
+    contact_email = Column(String(120), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    source = Column(String(200), default="Lok Sabha Secretariat (18th Lok Sabha)")
+    last_verified = Column(DateTime, default=utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    constituency = relationship("ParliamentaryConstituency", back_populates="mp")
 

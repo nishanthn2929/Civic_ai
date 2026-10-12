@@ -42,14 +42,29 @@ class ExifMetadataService:
                     if 'W' in lon_ref:
                         lon = -lon
 
+                    altitude = None
+                    if 'GPS GPSAltitude' in tags:
+                        alt_val = cls._ratio_to_float(tags['GPS GPSAltitude'].values[0]) if tags['GPS GPSAltitude'].values else None
+                        alt_ref = str(tags.get('GPS GPSAltitudeRef', '0')).strip()
+                        if alt_val is not None:
+                            altitude = -alt_val if alt_ref == '1' else alt_val
+
                     dt = str(tags.get('EXIF DateTimeOriginal') or tags.get('Image DateTime') or '')
                     if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                        lat_r = round(lat, 6)
+                        lon_r = round(lon, 6)
                         return {
                             "has_gps": True,
-                            "latitude": round(lat, 6),
-                            "longitude": round(lon, 6),
+                            "photo_gps_available": True,
+                            "latitude": lat_r,
+                            "longitude": lon_r,
+                            "photo_latitude": lat_r,
+                            "photo_longitude": lon_r,
+                            "photo_altitude": round(altitude, 2) if altitude is not None else None,
+                            "photo_gps_source": "EXIF",
                             "source": "EXIF_PHOTO_GEOTAG",
-                            "capture_datetime": dt or None
+                            "capture_datetime": dt or None,
+                            "photo_timestamp": dt or None
                         }
         except Exception as e:
             print(f"[ExifRead Engine Warning] {e}")
@@ -87,10 +102,16 @@ class ExifMetadataService:
         """
         result = {
             "has_gps": False,
+            "photo_gps_available": False,
             "latitude": None,
             "longitude": None,
+            "photo_latitude": None,
+            "photo_longitude": None,
+            "photo_altitude": None,
+            "photo_gps_source": "NONE",
             "source": None,
-            "capture_datetime": None
+            "capture_datetime": None,
+            "photo_timestamp": None
         }
 
         if not image_bytes:
@@ -111,7 +132,9 @@ class ExifMetadataService:
             # Capture Date & Time (DateTimeOriginal 36867 or DateTime 306)
             date_time = exif.get(36867) or exif.get(306)
             if date_time:
-                result["capture_datetime"] = str(date_time)
+                dt_str = str(date_time)
+                result["capture_datetime"] = dt_str
+                result["photo_timestamp"] = dt_str
 
             # GPS IFD Extraction
             gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)
@@ -128,6 +151,8 @@ class ExifMetadataService:
             # 2: GPSLatitude ((deg, 1), (min, 1), (sec, 1))
             # 3: GPSLongitudeRef ('E' or 'W')
             # 4: GPSLongitude ((deg, 1), (min, 1), (sec, 1))
+            # 5: GPSAltitudeRef (0 = above sea level, 1 = below sea level)
+            # 6: GPSAltitude (rational)
             lat_ref = gps_ifd.get(ExifTags.GPS.GPSLatitudeRef, gps_ifd.get(1, "N"))
             lat_dms = gps_ifd.get(ExifTags.GPS.GPSLatitude, gps_ifd.get(2))
             lon_ref = gps_ifd.get(ExifTags.GPS.GPSLongitudeRef, gps_ifd.get(3, "E"))
@@ -136,11 +161,28 @@ class ExifMetadataService:
             lat = cls._dms_to_dd(lat_dms, lat_ref)
             lon = cls._dms_to_dd(lon_dms, lon_ref)
 
+            alt_val = gps_ifd.get(ExifTags.GPS.GPSAltitude, gps_ifd.get(6))
+            alt_ref = gps_ifd.get(ExifTags.GPS.GPSAltitudeRef, gps_ifd.get(5, 0))
+            altitude = None
+            if alt_val is not None:
+                try:
+                    alt_f = float(alt_val)
+                    altitude = -alt_f if int(alt_ref) == 1 else alt_f
+                except Exception:
+                    pass
+
             if lat is not None and lon is not None:
                 if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                    lat_r = round(lat, 6)
+                    lon_r = round(lon, 6)
                     result["has_gps"] = True
-                    result["latitude"] = round(lat, 6)
-                    result["longitude"] = round(lon, 6)
+                    result["photo_gps_available"] = True
+                    result["latitude"] = lat_r
+                    result["longitude"] = lon_r
+                    result["photo_latitude"] = lat_r
+                    result["photo_longitude"] = lon_r
+                    result["photo_altitude"] = round(altitude, 2) if altitude is not None else None
+                    result["photo_gps_source"] = "EXIF"
                     result["source"] = "EXIF_PHOTO_GEOTAG"
         except Exception as e:
             print(f"[Pillow Exif Fallback Warning] {e}")
@@ -148,3 +190,4 @@ class ExifMetadataService:
         return result
 
 exif_service = ExifMetadataService()
+

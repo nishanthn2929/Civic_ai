@@ -1,0 +1,7 @@
+path: C:/Users/nisha/OneDrive/Desktop/pixel/ml_pipeline/unified_potholes
+train: train/images
+val: val/images
+
+nc: 1
+names:
+  0: pothole

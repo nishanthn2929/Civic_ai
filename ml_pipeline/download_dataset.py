@@ -46,7 +46,7 @@ names:
         f.write(yaml_content)
 
     print(f"Generated clean data.yaml at: {yaml_path}")
-    print("Dataset preparation ready for YOLO training!")
+    print("Dataset preparation ready for RT-DETR training!")
 
 if __name__ == "__main__":
     download_and_prepare_dataset()

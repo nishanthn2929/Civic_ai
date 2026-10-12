@@ -14,6 +14,21 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      const url = error.config?.url || '';
+      if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.dispatchEvent(new Event('civic:auth-expired'));
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const authService = {
   login: async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
@@ -25,6 +40,14 @@ export const authService = {
   },
   register: async (userData) => {
     const res = await api.post('/auth/register', userData);
+    if (res.data.access_token) {
+      localStorage.setItem('token', res.data.access_token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+    }
+    return res.data;
+  },
+  googleLogin: async ({ email, name, role, google_id }) => {
+    const res = await api.post('/auth/google', { email, name, role, google_id });
     if (res.data.access_token) {
       localStorage.setItem('token', res.data.access_token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
@@ -62,12 +85,40 @@ export const citizenService = {
     });
     return res.data?.results || [];
   },
+  checkDuplicate: async (formData) => {
+    const res = await api.post('/reports/check-duplicate', formData);
+    return res.data;
+  },
   createReport: async (formData) => {
     const res = await api.post('/reports/create', formData);
     return res.data;
   },
   getMyReports: async () => {
     const res = await api.get('/reports/my');
+    return res.data;
+  },
+  clearMyReports: async () => {
+    const res = await api.delete('/reports/my/clear');
+    return res.data;
+  },
+  clearStoredReports: async (ids) => {
+    const res = await api.post('/reports/clear-stored', { ids });
+    return res.data;
+  },
+  deleteReport: async (id) => {
+    const res = await api.delete(`/reports/${id}`);
+    return res.data;
+  },
+  getReportById: async (id) => {
+    const res = await api.get(`/reports/${id}`);
+    return res.data;
+  },
+  getBatchReports: async (ids) => {
+    const res = await api.post('/reports/batch', { ids });
+    return res.data;
+  },
+  getIncidentByCode: async (code) => {
+    const res = await api.get(`/incidents/code/${encodeURIComponent(code)}`);
     return res.data;
   },
   parseVoice: async (payload) => {
@@ -86,6 +137,10 @@ export const citizenService = {
     const res = await api.post('/drive/process-frame', payload);
     return res.data;
   },
+  syncOfflineDrive: async (frames) => {
+    const res = await api.post('/drive/sync-offline', frames);
+    return res.data;
+  },
   getWardSourceInfo: async () => {
     const res = await api.get('/reports/ward-source-info');
     return res.data;
@@ -95,6 +150,13 @@ export const citizenService = {
       verified,
       feedback
     });
+    return res.data;
+  }
+};
+
+export const chatService = {
+  send: async (messages, context = {}) => {
+    const res = await api.post('/chat', { messages, ...context });
     return res.data;
   }
 };
@@ -205,6 +267,38 @@ export const adminService = {
   getWardBackups: async () => {
     const res = await api.get('/admin/wards/backups');
     return res.data?.backups || [];
+  },
+  getRepresentatives: async () => {
+    const res = await api.get('/admin/representatives');
+    return res.data;
+  },
+  updateMla: async (id, data) => {
+    const res = await api.put(`/admin/mlas/${id}`, data);
+    return res.data;
+  },
+  updateMp: async (id, data) => {
+    const res = await api.put(`/admin/mps/${id}`, data);
+    return res.data;
+  },
+  getGisLayers: async () => {
+    const res = await api.get('/admin/gis/layers');
+    return res.data;
+  },
+  getAssemblyConstituencies: async () => {
+    const res = await api.get('/admin/gis/assembly-constituencies');
+    return res.data;
+  },
+  getParliamentaryConstituencies: async () => {
+    const res = await api.get('/admin/gis/parliamentary-constituencies');
+    return res.data;
+  },
+  getDuplicateGroups: async () => {
+    const res = await api.get('/admin/duplicate-groups');
+    return res.data;
+  },
+  unlinkDuplicate: async (reportId) => {
+    const res = await api.post(`/admin/duplicate-groups/${reportId}/unlink`);
+    return res.data;
   }
 };
 

@@ -188,7 +188,7 @@ def seed():
 
     # 4. Tunable Configuration Settings
     default_configs = [
-        ConfigSetting(key="CONFIDENCE_THRESHOLD", value="0.50", description="Minimum AI YOLO confidence to accept detection"),
+        ConfigSetting(key="CONFIDENCE_THRESHOLD", value="0.50", description="Minimum RT-DETR confidence to accept detection"),
         ConfigSetting(key="BLUR_THRESHOLD", value="100.0", description="Laplacian variance threshold for image clarity"),
         ConfigSetting(key="DUPLICATE_RADIUS_METERS", value="25.0", description="Spatial search radius for duplicate grouping"),
         ConfigSetting(key="DUPLICATE_SCORE_THRESHOLD", value="0.70", description="Composite similarity threshold to merge reports"),
@@ -239,20 +239,6 @@ def seed():
         new_status=IncidentStatus.VERIFIED.value,
         comment="Automated verification passed: high AI confidence (94%) and GPS validated.",
         created_at=now - timedelta(days=2, hours=3)
-    ))
-    db.add(IncidentStatusHistory(
-        incident_id=inc1.id,
-        old_status=IncidentStatus.VERIFIED.value,
-        new_status=IncidentStatus.VERIFIED.value,
-        comment="Confirming report #2 merged via AI Dashcam Drive Mode (Score: 0.89). Reports count: 2.",
-        created_at=now - timedelta(days=1, hours=8)
-    ))
-    db.add(IncidentStatusHistory(
-        incident_id=inc1.id,
-        old_status=IncidentStatus.VERIFIED.value,
-        new_status=IncidentStatus.VERIFIED.value,
-        comment="Confirming report #3 merged via citizen voice complaint. Priority escalated to 82.5.",
-        created_at=now - timedelta(hours=6)
     ))
 
     # Incident 2: Resolved Pothole in HSR Layout with Before & After evidence awaiting citizen verification
@@ -329,6 +315,97 @@ def seed():
         comment="Repair machinery deployed on site. Night resurfacing underway.",
         created_at=now - timedelta(hours=4)
     ))
+
+    # 7. Seed Citizen Reports linked to Canonical Incidents
+    rep1 = Report(
+        user_id=citizen_ananya.id,
+        source="manual",
+        raw_text="Dangerous crater pothole on 80ft Road Koramangala. Two-wheelers skidding frequently.",
+        category="Pothole",
+        ai_confidence=0.94,
+        latitude=12.9352,
+        longitude=77.6245,
+        gps_accuracy=8.2,
+        location_source="GPS",
+        ward_number=151,
+        ward_name="Koramangala",
+        ward_detection_method="POINT_IN_POLYGON",
+        assembly_constituency_number=172,
+        assembly_constituency_name="BTM Layout",
+        mla_name="Ramalinga Reddy",
+        mla_party="INC",
+        parliamentary_constituency_number=26,
+        parliamentary_constituency_name="Bangalore South",
+        mp_name="Tejasvi Surya",
+        mp_party="BJP",
+        address="80 Feet Road, 4th Block, Koramangala, Bengaluru",
+        ward_id=wards_map.get(151).id if 151 in wards_map else None,
+        incident_id=inc1.id,
+        quality_score=0.95,
+        status="verified",
+        created_at=now - timedelta(days=2, hours=4)
+    )
+    db.add(rep1)
+    db.flush()
+    db.add(ReportMedia(report_id=rep1.id, media_url=pothole_img1, blur_score=160.0))
+
+    # Report 2 awaiting Citizen Verification sign-off
+    rep2 = Report(
+        user_id=citizen_ananya.id,
+        source="manual",
+        raw_text="Road cavity near HSR 27th Main junction causing severe traffic slowdowns.",
+        category="Pothole",
+        ai_confidence=0.91,
+        latitude=12.9128,
+        longitude=77.6445,
+        gps_accuracy=7.5,
+        location_source="GPS",
+        ward_number=174,
+        ward_name="HSR Layout",
+        ward_detection_method="POINT_IN_POLYGON",
+        assembly_constituency_number=175,
+        assembly_constituency_name="Bommanahalli",
+        mla_name="M. Satish Reddy",
+        mla_party="BJP",
+        parliamentary_constituency_number=26,
+        parliamentary_constituency_name="Bangalore South",
+        mp_name="Tejasvi Surya",
+        mp_party="BJP",
+        address="27th Main, Sector 1, HSR Layout, Bengaluru",
+        ward_id=wards_map.get(174).id if 174 in wards_map else None,
+        incident_id=inc2.id,
+        quality_score=0.92,
+        status="verified",
+        created_at=now - timedelta(days=4)
+    )
+    db.add(rep2)
+    db.flush()
+    db.add(ReportMedia(report_id=rep2.id, media_url=pothole_img2, blur_score=150.0))
+
+    # Report 3 on Whitefield Road Damage
+    rep3 = Report(
+        user_id=citizen_rahul.id,
+        source="voice",
+        raw_text="Severe asphalt subsidence on Whitefield Main Road near ITPL following utility trenching.",
+        category="Road Damage",
+        ai_confidence=0.88,
+        latitude=12.9698,
+        longitude=77.7499,
+        gps_accuracy=9.0,
+        location_source="DEVICE_GPS",
+        ward_number=85,
+        ward_name="Doddanekkundi",
+        ward_detection_method="POINT_IN_POLYGON",
+        address="Whitefield Main Road, near ITPL, Bengaluru",
+        ward_id=wards_map.get(85).id if 85 in wards_map else None,
+        incident_id=inc3.id,
+        quality_score=0.90,
+        status="verified",
+        created_at=now - timedelta(days=1, hours=10)
+    )
+    db.add(rep3)
+    db.flush()
+    db.add(ReportMedia(report_id=rep3.id, media_url=damage_img, blur_score=140.0))
 
     db.commit()
     db.close()

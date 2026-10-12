@@ -1,18 +1,23 @@
 import json
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.models.models import (
-    User, ConfigSetting, AuditLog, Incident, Ward, Department, BBMPWard, BBMPWardDataset
+    User, ConfigSetting, AuditLog, Incident, IncidentStatus, Report, ReportStatus,
+    Ward, Department, BBMPWard, BBMPWardDataset,
+    AssemblyConstituency, MLA, ParliamentaryConstituency, MP, utcnow
 )
 from backend.app.schemas.schemas import (
-    ConfigSettingUpdate, ConfigSettingOut, AuditLogOut, UserOut
+    ConfigSettingUpdate, ConfigSettingOut, AuditLogOut, UserOut,
+    MLAOut, MLAUpdate, MPOut, MPUpdate, AssemblyConstituencyOut, ParliamentaryConstituencyOut
 )
 from backend.app.api.deps import require_role
 from backend.app.services.government_adapter import govt_adapter
 from backend.app.services.duplicate_engine import duplicate_engine
 from backend.app.services.gis_service import gis_service
+from backend.app.services.constituency_service import constituency_service
 from backend.app.services.ward_importer import ward_importer, WardValidationException
 from backend.app.core.config import settings
 
@@ -50,8 +55,19 @@ def update_config_setting(
     # If updating duplicate engine settings in memory
     if update_data.key == "DUPLICATE_RADIUS_METERS":
         duplicate_engine.max_radius = float(update_data.value)
-    elif update_data.key == "DUPLICATE_SCORE_THRESHOLD":
+    elif update_data.key in ["DUPLICATE_SCORE_THRESHOLD", "DUPLICATE_POSSIBLE_THRESHOLD"]:
         duplicate_engine.threshold = float(update_data.value)
+        duplicate_engine.possible_threshold = float(update_data.value)
+    elif update_data.key == "DUPLICATE_CONFIRMED_THRESHOLD":
+        duplicate_engine.confirmed_threshold = float(update_data.value)
+    elif update_data.key == "WEIGHT_LOCATION":
+        duplicate_engine.w_loc = float(update_data.value)
+    elif update_data.key == "WEIGHT_CATEGORY":
+        duplicate_engine.w_cat = float(update_data.value)
+    elif update_data.key == "WEIGHT_VISUAL":
+        duplicate_engine.w_vis = float(update_data.value)
+    elif update_data.key == "WEIGHT_TEXT":
+        duplicate_engine.w_text = float(update_data.value)
     elif update_data.key == "CONFIDENCE_THRESHOLD":
         settings.DEFAULT_CONFIDENCE_THRESHOLD = float(update_data.value)
 
@@ -246,6 +262,15 @@ def detect_ward_by_coordinates(
         "formatted_address": loc.get("formatted_address"),
         "detection_method": loc.get("detection_method"),
         "source_verification": loc.get("source_verification"),
+        "assembly_constituency": loc.get("assembly_constituency"),
+        "assembly_constituency_number": loc.get("assembly_constituency_number"),
+        "mla_name": loc.get("mla_name"),
+        "mla_party": loc.get("mla_party"),
+        "parliamentary_constituency": loc.get("parliamentary_constituency"),
+        "parliamentary_constituency_number": loc.get("parliamentary_constituency_number"),
+        "mp_name": loc.get("mp_name"),
+        "mp_party": loc.get("mp_party"),
+        "boundary_warning": loc.get("boundary_warning", False),
         "geometry": highlight_geom
     }
 
@@ -346,4 +371,400 @@ def list_dataset_backups(
 ):
     """List historical preserved ward boundary backups."""
     return {"backups": ward_importer.list_backups()}
+
+# ----------------- Representative Management & GIS Endpoints -----------------
+@router.get("/representatives")
+def list_representatives(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """List all MLAs and MPs with their constituencies, parties, and verification status."""
+    acs = db.query(AssemblyConstituency).order_by(AssemblyConstituency.constituency_number.asc()).all()
+    pcs = db.query(ParliamentaryConstituency).order_by(ParliamentaryConstituency.constituency_number.asc()).all()
+    
+    mla_list = []
+    for ac in acs:
+        if ac.mla:
+            mla_list.append({
+                "id": ac.mla.id,
+                "assembly_constituency_id": ac.id,
+                "constituency_number": ac.constituency_number,
+                "constituency_name": ac.constituency_name,
+                "district": ac.district,
+                "name": ac.mla.name,
+                "party": ac.mla.party,
+                "term": ac.mla.term,
+                "official_profile_url": ac.mla.official_profile_url,
+                "contact_email": ac.mla.contact_email,
+                "contact_phone": ac.mla.contact_phone,
+                "source": ac.mla.source,
+                "last_verified": ac.mla.last_verified.isoformat() if ac.mla.last_verified else None,
+                "updated_at": ac.mla.updated_at.isoformat() if ac.mla.updated_at else None
+            })
+
+    mp_list = []
+    for pc in pcs:
+        if pc.mp:
+            mp_list.append({
+                "id": pc.mp.id,
+                "parliamentary_constituency_id": pc.id,
+                "constituency_number": pc.constituency_number,
+                "constituency_name": pc.constituency_name,
+                "state": pc.state,
+                "name": pc.mp.name,
+                "party": pc.mp.party,
+                "term": pc.mp.term,
+                "official_profile_url": pc.mp.official_profile_url,
+                "contact_email": pc.mp.contact_email,
+                "contact_phone": pc.mp.contact_phone,
+                "source": pc.mp.source,
+                "last_verified": pc.mp.last_verified.isoformat() if pc.mp.last_verified else None,
+                "updated_at": pc.mp.updated_at.isoformat() if pc.mp.updated_at else None
+            })
+
+    return {
+        "mlas": mla_list,
+        "mps": mp_list,
+        "mla_count": len(mla_list),
+        "mp_count": len(mp_list)
+    }
+
+@router.put("/mlas/{mla_id}")
+def update_mla(
+    mla_id: int,
+    payload: MLAUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """Update MLA representative info with freshness audit trail."""
+    mla = db.query(MLA).filter(MLA.id == mla_id).first()
+    if not mla:
+        raise HTTPException(status_code=404, detail="MLA record not found.")
+
+    if payload.name is not None:
+        mla.name = payload.name
+    if payload.party is not None:
+        mla.party = payload.party
+    if payload.term is not None:
+        mla.term = payload.term
+    if payload.official_profile_url is not None:
+        mla.official_profile_url = payload.official_profile_url
+    if payload.contact_email is not None:
+        mla.contact_email = payload.contact_email
+    if payload.contact_phone is not None:
+        mla.contact_phone = payload.contact_phone
+    if payload.source is not None:
+        mla.source = payload.source
+
+    mla.last_verified = datetime.now(timezone.utc)
+    mla.updated_at = datetime.now(timezone.utc)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="MLA_DATA_UPDATED",
+        entity_type="mla",
+        entity_id=mla.id,
+        details_json=json.dumps({"name": mla.name, "party": mla.party})
+    ))
+    db.commit()
+    db.refresh(mla)
+    return {"message": "MLA record updated successfully.", "id": mla.id, "name": mla.name, "last_verified": mla.last_verified.isoformat()}
+
+@router.put("/mps/{mp_id}")
+def update_mp(
+    mp_id: int,
+    payload: MPUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """Update MP representative info with freshness audit trail."""
+    mp = db.query(MP).filter(MP.id == mp_id).first()
+    if not mp:
+        raise HTTPException(status_code=404, detail="MP record not found.")
+
+    if payload.name is not None:
+        mp.name = payload.name
+    if payload.party is not None:
+        mp.party = payload.party
+    if payload.term is not None:
+        mp.term = payload.term
+    if payload.official_profile_url is not None:
+        mp.official_profile_url = payload.official_profile_url
+    if payload.contact_email is not None:
+        mp.contact_email = payload.contact_email
+    if payload.contact_phone is not None:
+        mp.contact_phone = payload.contact_phone
+    if payload.source is not None:
+        mp.source = payload.source
+
+    mp.last_verified = datetime.now(timezone.utc)
+    mp.updated_at = datetime.now(timezone.utc)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="MP_DATA_UPDATED",
+        entity_type="mp",
+        entity_id=mp.id,
+        details_json=json.dumps({"name": mp.name, "party": mp.party})
+    ))
+    db.commit()
+    db.refresh(mp)
+    return {"message": "MP record updated successfully.", "id": mp.id, "name": mp.name, "last_verified": mp.last_verified.isoformat()}
+
+@router.get("/gis/layers")
+def get_gis_layers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """
+    Returns multi-layer GIS metadata and features for Admin GIS Mapping:
+    - Layer 1: Civic Issue GPS Points
+    - Layer 2: BBMP Wards
+    - Layer 3: Assembly Constituencies
+    - Layer 4: Parliamentary Constituencies
+    """
+    # 1. Incidents GeoJSON Points
+    incidents = db.query(Incident).filter(Incident.status != "CLOSED").all()
+    incident_features = []
+    for inc in incidents:
+        incident_features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [inc.longitude, inc.latitude]
+            },
+            "properties": {
+                "id": inc.id,
+                "incident_code": inc.incident_code,
+                "category": inc.category,
+                "title": inc.title,
+                "severity": inc.severity,
+                "status": inc.status,
+                "ward_number": inc.ward_number,
+                "ward_name": inc.ward_name,
+                "assembly_constituency": inc.assembly_constituency_name,
+                "mla_name": inc.mla_name,
+                "mla_party": inc.mla_party,
+                "parliamentary_constituency": inc.parliamentary_constituency_name,
+                "mp_name": inc.mp_name,
+                "mp_party": inc.mp_party,
+                "location_source": inc.location_source,
+                "gps_accuracy": inc.gps_accuracy,
+                "boundary_warning": inc.boundary_warning,
+                "photo_gps_available": inc.photo_gps_available,
+                "created_at": inc.created_at.isoformat() if inc.created_at else None
+            }
+        })
+
+    incidents_geojson = {
+        "type": "FeatureCollection",
+        "features": incident_features
+    }
+
+    # 2. BBMP Wards GeoJSON
+    wards_geojson = gis_service.get_all_wards_geojson()
+
+    # 3. Assembly Constituencies GeoJSON
+    ac_geojson = constituency_service.get_ac_geojson()
+
+    # 4. Parliamentary Constituencies GeoJSON
+    pc_geojson = constituency_service.get_pc_geojson()
+
+    return {
+        "layer_incidents": incidents_geojson,
+        "layer_wards": wards_geojson,
+        "layer_assembly_constituencies": ac_geojson,
+        "layer_parliamentary_constituencies": pc_geojson
+    }
+
+@router.get("/gis/assembly-constituencies")
+def get_assembly_constituencies_geojson(
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """Return GeoJSON of all Karnataka Assembly Constituencies covering Bengaluru."""
+    return constituency_service.get_ac_geojson()
+
+@router.get("/gis/parliamentary-constituencies")
+def get_parliamentary_constituencies_geojson(
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """Return GeoJSON of all Parliamentary Constituencies covering Bengaluru."""
+    return constituency_service.get_pc_geojson()
+
+@router.get("/duplicate-groups")
+def get_duplicate_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "authority"]))
+):
+    """
+    Retrieve all duplicate civic issue clusters, primary reports,
+    attached duplicates, and multi-signal metrics.
+    """
+    incidents_with_dups = db.query(Incident).filter(
+        (Incident.reports_count > 1) | (Incident.has_duplicates == True)
+    ).order_by(Incident.reports_count.desc(), Incident.created_at.desc()).all()
+
+    groups = []
+    total_merged_reports = 0
+
+    for inc in incidents_with_dups:
+        reports = db.query(Report).filter(Report.incident_id == inc.id).order_by(Report.id.asc()).all()
+        if not reports:
+            continue
+
+        primary_report = reports[0]
+        duplicate_reports = reports[1:]
+        total_merged_reports += len(duplicate_reports)
+
+        dup_items = []
+        for r in duplicate_reports:
+            signals = {}
+            if r.duplicate_signals:
+                try:
+                    signals = json.loads(r.duplicate_signals)
+                except Exception:
+                    signals = {}
+
+            dup_items.append({
+                "id": r.id,
+                "created_at": r.created_at,
+                "source": r.source,
+                "status": r.status,
+                "duplicate_status": r.duplicate_status or "CONFIRMED_DUPLICATE",
+                "duplicate_score": r.duplicate_score or 0.85,
+                "signals": signals,
+                "raw_text": r.raw_text,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "media_url": r.media[0].media_url if r.media else None
+            })
+
+        avg_score = (
+            sum(d["duplicate_score"] for d in dup_items) / len(dup_items)
+            if dup_items else 0.85
+        )
+
+        groups.append({
+            "group_id": inc.duplicate_group_id or f"DUP-GRP-{inc.incident_code}",
+            "incident_id": inc.id,
+            "incident_code": inc.incident_code,
+            "category": inc.category,
+            "title": inc.title,
+            "ward_name": inc.ward_name or (inc.ward.ward_name if inc.ward else "Bengaluru"),
+            "ward_number": inc.ward_number,
+            "latitude": inc.latitude,
+            "longitude": inc.longitude,
+            "address": inc.address,
+            "primary_media_url": inc.primary_media_url,
+            "created_at": inc.created_at,
+            "status": inc.status,
+            "total_reports": len(reports),
+            "duplicate_count": len(duplicate_reports),
+            "average_similarity_score": round(avg_score, 3),
+            "primary_report": {
+                "id": primary_report.id,
+                "created_at": primary_report.created_at,
+                "source": primary_report.source,
+                "raw_text": primary_report.raw_text,
+                "media_url": primary_report.media[0].media_url if primary_report.media else inc.primary_media_url
+            },
+            "duplicate_reports": dup_items
+        })
+
+    total_reports = db.query(Report).count()
+    total_incidents = db.query(Incident).count()
+    total_duplicates = db.query(Report).filter(Report.is_duplicate == True).count()
+
+    return {
+        "summary": {
+            "total_reports": total_reports,
+            "total_incidents": total_incidents,
+            "duplicate_clusters_count": len(groups),
+            "total_duplicate_reports_merged": total_duplicates,
+            "estimated_duplicate_prevention_rate": round((total_duplicates / max(1, total_reports)) * 100, 1),
+            "thresholds": {
+                "confirmed": duplicate_engine.confirmed_threshold,
+                "possible": duplicate_engine.possible_threshold,
+                "search_radius_meters": duplicate_engine.max_radius,
+                "weights": {
+                    "location": duplicate_engine.w_loc,
+                    "category": duplicate_engine.w_cat,
+                    "visual": duplicate_engine.w_vis,
+                    "text": duplicate_engine.w_text
+                }
+            }
+        },
+        "groups": groups
+    }
+
+@router.post("/duplicate-groups/{report_id}/unlink")
+def unlink_duplicate_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """
+    Unlink a misclassified duplicate report into its own distinct Incident.
+    """
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    old_incident = db.query(Incident).filter(Incident.id == report.incident_id).first()
+    if old_incident:
+        old_incident.reports_count = max(1, old_incident.reports_count - 1)
+        old_incident.duplicate_count = max(0, (old_incident.duplicate_count or 1) - 1)
+        if old_incident.duplicate_count == 0:
+            old_incident.has_duplicates = False
+
+    from backend.app.services.priority_engine import priority_engine
+    from backend.app.services.routing_service import routing_service
+    import uuid
+
+    dept = routing_service.get_department_for_category(db, report.category)
+    calc_sev = priority_engine.calculate_severity(report.category, report.ai_confidence or 0.8)
+    calc_pri = priority_engine.calculate_priority_score(calc_sev, 1, report.ai_confidence or 0.8)
+
+    new_inc = Incident(
+        incident_code=f"BLR-{report.category[:3].upper()}-{uuid.uuid4().hex[:6].upper()}",
+        category=report.category,
+        title=f"{report.category} at {report.address or 'Bengaluru'}",
+        description=report.raw_text or f"Unlinked independent civic issue #{report.id}",
+        severity=calc_sev,
+        priority_score=calc_pri,
+        status=IncidentStatus.VERIFIED.value,
+        latitude=report.latitude,
+        longitude=report.longitude,
+        ward_number=report.ward_number,
+        ward_name=report.ward_name,
+        address=report.address,
+        ward_id=report.ward_id,
+        department_id=dept.id if dept else None,
+        reports_count=1,
+        duplicate_count=0,
+        has_duplicates=False,
+        primary_media_url=report.media[0].media_url if report.media else None
+    )
+    db.add(new_inc)
+    db.flush()
+
+    report.incident_id = new_inc.id
+    report.is_duplicate = False
+    report.duplicate_status = "UNLINKED_MANUAL"
+    report.primary_report_id = None
+    report.duplicate_group_id = None
+    report.status = ReportStatus.VERIFIED.value
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="REPORT_DUPLICATE_UNLINKED",
+        entity_type="report",
+        entity_id=report.id,
+        details_json=json.dumps({"old_incident_id": old_incident.id if old_incident else None, "new_incident_id": new_inc.id})
+    ))
+
+    db.commit()
+    return {"message": "Report successfully unlinked into new independent incident", "new_incident_code": new_inc.incident_code}
+
+
 
