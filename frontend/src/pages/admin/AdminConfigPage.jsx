@@ -436,17 +436,51 @@ export default function AdminConfigPage() {
                 {handoffData.formatted_dossier}
               </pre>
 
-              <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-                <span>BBMP Grievance Helpline: <strong className="text-white font-mono">1533</strong></span>
-                <a
-                  href={handoffData.official_portal_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1 font-semibold"
-                >
-                  <span>BBMP Sahaya 2.0 Gateway</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 pt-2 border-t border-white/[0.06]">
+                <div className="flex items-center gap-2">
+                  <span>BBMP 24x7 Helpline:</span>
+                  <a
+                    href="tel:1533"
+                    className="text-white font-mono font-bold hover:text-emerald-400 transition-colors bg-white/[0.05] px-2 py-0.5 rounded-md border border-white/[0.08]"
+                  >
+                    📞 1533
+                  </a>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <a
+                    href="https://nammabengaluru.org.in/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1 font-semibold transition-colors"
+                    title="Official BBMP Namma Bengaluru (Sahaaya 2.0) Grievance Gateway"
+                  >
+                    <span>BBMP Sahaya 2.0 Gateway</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+
+                  <a
+                    href="https://play.google.com/store/apps/details?id=com.nammabengaluruNew.org"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-1 font-semibold transition-colors"
+                    title="Official Namma Bengaluru (Sahaaya 2.0) App on Google Play Store"
+                  >
+                    <span>Sahaaya 2.0 App</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+
+                  <a
+                    href="https://ipgrs.karnataka.gov.in"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-semibold transition-colors"
+                    title="Karnataka Integrated Public Grievance Redressal System"
+                  >
+                    <span>IPGRS Grievance Portal</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
               </div>
             </div>
           )}

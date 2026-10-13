@@ -65,16 +65,17 @@ export default function DuplicateClusterManager() {
   };
 
   const summary = data?.summary || {};
-  const groups = data?.groups || [];
+  const groups = Array.isArray(data?.groups) ? data.groups : [];
 
   const filteredGroups = groups.filter((g) => {
-    const inc = g.primary_incident || {};
-    const q = searchQuery.toLowerCase();
+    const inc = g.primary_incident || g || {};
+    const q = (searchQuery || '').toLowerCase().trim();
+    if (!q) return true;
     return (
-      (inc.incident_code || '').toLowerCase().includes(q) ||
-      (inc.category || '').toLowerCase().includes(q) ||
-      (inc.ward_name || '').toLowerCase().includes(q) ||
-      (inc.title || '').toLowerCase().includes(q) ||
+      (inc.incident_code || g.incident_code || '').toLowerCase().includes(q) ||
+      (inc.category || g.category || '').toLowerCase().includes(q) ||
+      (inc.ward_name || g.ward_name || '').toLowerCase().includes(q) ||
+      (inc.title || g.title || '').toLowerCase().includes(q) ||
       (g.group_id || '').toLowerCase().includes(q)
     );
   });
@@ -242,14 +243,27 @@ export default function DuplicateClusterManager() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredGroups.map((group) => {
-            const primary = group.primary_incident || {};
+          {filteredGroups.map((group, groupIdx) => {
+            const primary = group.primary_incident || group || {};
             const isExpanded = !!expandedGroups[group.group_id];
-            const avgScorePercent = Math.round((group.avg_duplicate_score || 0.85) * 100);
+            const avgScorePercent = Math.round(
+              (group.avg_duplicate_score ?? group.average_similarity_score ?? 0.85) * 100
+            );
+
+            // Defensive resolution of reports list
+            const reportsList = Array.isArray(group.reports) && group.reports.length > 0
+              ? group.reports
+              : [
+                  ...(group.primary_report ? [{ ...group.primary_report, is_primary: true }] : []),
+                  ...(Array.isArray(group.duplicate_reports) ? group.duplicate_reports : [])
+                ];
+
+            const duplicatesCount = group.duplicates_count ?? group.duplicate_count ?? Math.max(0, reportsList.length - 1);
+            const totalReportsCount = group.reports_count ?? group.total_reports ?? reportsList.length;
 
             return (
               <div
-                key={group.group_id}
+                key={group.group_id || `group-${groupIdx}`}
                 className="glass-card rounded-2xl border border-white/[0.08] overflow-hidden shadow-lg transition-all"
               >
                 {/* Cluster Header */}
@@ -264,21 +278,21 @@ export default function DuplicateClusterManager() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-bold text-purple-300">
-                          {group.group_id}
+                          {group.group_id || `GRP-${groupIdx + 1}`}
                         </span>
                         <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                          #{primary.incident_code || `INC-${primary.id}`}
+                          #{primary.incident_code || group.incident_code || `INC-${primary.id || group.incident_id || groupIdx + 1}`}
                         </span>
                         <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                          {primary.category}
+                          {primary.category || group.category || 'Civic Issue'}
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-1 font-medium">
-                        {primary.title || 'Civic Issue'}
+                        {primary.title || group.title || 'Civic Issue'}
                       </p>
                       <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                         <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
-                        {primary.ward_name || 'Bengaluru Urban'}
+                        {primary.ward_name || group.ward_name || 'Bengaluru Urban'}
                       </p>
                     </div>
                   </div>
@@ -289,7 +303,7 @@ export default function DuplicateClusterManager() {
                         {avgScorePercent}% Avg Similarity
                       </span>
                       <p className="text-[10px] text-slate-400 mt-1">
-                        {group.duplicates_count} merged ({group.reports_count} total reports)
+                        {duplicatesCount} merged ({totalReportsCount} total reports)
                       </p>
                     </div>
                     <button className="text-slate-400 p-1 rounded hover:bg-white/[0.05]">
@@ -302,13 +316,15 @@ export default function DuplicateClusterManager() {
                 {isExpanded && (
                   <div className="border-t border-white/[0.08] bg-slate-950/60 p-4 space-y-3">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      Reports Linked in this Duplicate Group ({group.reports.length})
+                      Reports Linked in this Duplicate Group ({reportsList.length})
                     </div>
 
                     <div className="space-y-2.5">
-                      {group.reports.map((rep) => {
-                        const scoreP = rep.duplicate_score ? Math.round(rep.duplicate_score * 100) : 85;
-                        const sigs = rep.duplicate_signals || {};
+                      {reportsList.map((rep, repIdx) => {
+                        const scoreP = rep.duplicate_score !== undefined
+                          ? Math.round(rep.duplicate_score * 100)
+                          : 85;
+                        const sigs = rep.duplicate_signals || rep.signals || {};
                         const locSig = sigs.location || {};
                         const catSig = sigs.category || {};
                         const visSig = sigs.visual || {};
@@ -316,7 +332,7 @@ export default function DuplicateClusterManager() {
 
                         return (
                           <div
-                            key={rep.id}
+                            key={rep.id || `rep-${groupIdx}-${repIdx}`}
                             className={`p-3.5 rounded-xl border transition-all ${
                               rep.is_primary
                                 ? 'bg-purple-950/20 border-purple-500/40'
@@ -327,7 +343,7 @@ export default function DuplicateClusterManager() {
                               <div className="space-y-1.5 flex-1 min-w-[200px]">
                                 <div className="flex items-center gap-2">
                                   <span className="font-mono text-xs font-bold text-white">
-                                    Report #{rep.id}
+                                    Report #{rep.id || repIdx + 1}
                                   </span>
                                   {rep.is_primary ? (
                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
@@ -347,7 +363,7 @@ export default function DuplicateClusterManager() {
                                   "{rep.raw_text || 'No text description'}"
                                 </p>
                                 <p className="text-[11px] text-slate-400 truncate">
-                                  📍 {rep.address || 'Bengaluru location'}
+                                  📍 {rep.address || primary.address || 'Bengaluru location'}
                                 </p>
 
                                 {/* Multi-signal breakdown chips for non-primary reports */}
@@ -357,20 +373,37 @@ export default function DuplicateClusterManager() {
                                       📍 GPS: {locSig.distance_meters !== undefined ? `${Math.round(locSig.distance_meters)}m away` : 'Within 50m'}
                                     </span>
                                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/[0.05]">
-                                      🏷️ Type: {Math.round((catSig.score || 1) * 100)}%
+                                      🏷️ Type: {Math.round((catSig.score !== undefined ? catSig.score : 1) * 100)}%
                                     </span>
                                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/[0.05]">
-                                      📷 Visual: {Math.round((visSig.score || 0.8) * 100)}%
+                                      📷 Visual: {Math.round((visSig.score !== undefined ? visSig.score : 0.8) * 100)}%
                                     </span>
                                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/[0.05]">
-                                      📝 Text: {Math.round((txtSig.score || 0.7) * 100)}%
+                                      📝 Text: {Math.round((txtSig.score !== undefined ? txtSig.score : 0.7) * 100)}%
                                     </span>
                                   </div>
                                 )}
                               </div>
 
-                              {/* Right side: Score & Unlink Button */}
+                              {/* Right side: Photo & Score & Unlink Button */}
                               <div className="flex flex-col items-end gap-2 shrink-0">
+                                {rep.media_url && (
+                                  <a
+                                    href={rep.media_url.startsWith('http') ? rep.media_url : `/api${rep.media_url.startsWith('/') ? '' : '/'}${rep.media_url}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/20 group hover:border-purple-400 transition-all block"
+                                    title="View attached photo"
+                                  >
+                                    <img
+                                      src={rep.media_url.startsWith('http') ? rep.media_url : `/api${rep.media_url.startsWith('/') ? '' : '/'}${rep.media_url}`}
+                                      alt="Report media"
+                                      className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  </a>
+                                )}
+
                                 {!rep.is_primary && (
                                   <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/25">
                                     {scoreP}% Match

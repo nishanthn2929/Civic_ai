@@ -70,6 +70,8 @@ def update_config_setting(
         duplicate_engine.w_text = float(update_data.value)
     elif update_data.key == "CONFIDENCE_THRESHOLD":
         settings.DEFAULT_CONFIDENCE_THRESHOLD = float(update_data.value)
+    elif update_data.key == "BLUR_THRESHOLD":
+        settings.DEFAULT_BLUR_THRESHOLD = float(update_data.value)
 
     db.add(AuditLog(
         user_id=current_user.id,
@@ -308,7 +310,7 @@ async def import_or_replace_dataset(
     file: UploadFile = File(...),
     source_name: str = Form(...),
     source_organization: str = Form("Government of Karnataka / BBMP"),
-    source_url: str = Form("https://bbmp.gov.in"),
+    source_url: str = Form("https://bbmp.karnataka.gov.in"),
     dataset_version: str = Form("BBMP-CUSTOM-V1"),
     dataset_date: str = Form("2026-09-08"),
     license_info: str = Form("Open Government Data (OGD) Karnataka / Public Record"),
@@ -627,16 +629,19 @@ def get_duplicate_groups(
 
             dup_items.append({
                 "id": r.id,
-                "created_at": r.created_at,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
                 "source": r.source,
                 "status": r.status,
                 "duplicate_status": r.duplicate_status or "CONFIRMED_DUPLICATE",
                 "duplicate_score": r.duplicate_score or 0.85,
                 "signals": signals,
+                "duplicate_signals": signals,
                 "raw_text": r.raw_text,
                 "latitude": r.latitude,
                 "longitude": r.longitude,
-                "media_url": r.media[0].media_url if r.media else None
+                "address": r.address or inc.address,
+                "media_url": r.media[0].media_url if r.media else None,
+                "is_primary": False
             })
 
         avg_score = (
@@ -644,9 +649,27 @@ def get_duplicate_groups(
             if dup_items else 0.85
         )
 
-        groups.append({
-            "group_id": inc.duplicate_group_id or f"DUP-GRP-{inc.incident_code}",
-            "incident_id": inc.id,
+        prim_item = {
+            "id": primary_report.id,
+            "created_at": primary_report.created_at.isoformat() if primary_report.created_at else None,
+            "source": primary_report.source,
+            "status": primary_report.status,
+            "duplicate_status": "PRIMARY",
+            "duplicate_score": 1.0,
+            "signals": {},
+            "duplicate_signals": {},
+            "raw_text": primary_report.raw_text,
+            "latitude": primary_report.latitude,
+            "longitude": primary_report.longitude,
+            "address": primary_report.address or inc.address,
+            "media_url": primary_report.media[0].media_url if primary_report.media else inc.primary_media_url,
+            "is_primary": True
+        }
+
+        all_reports = [prim_item] + dup_items
+
+        primary_inc = {
+            "id": inc.id,
             "incident_code": inc.incident_code,
             "category": inc.category,
             "title": inc.title,
@@ -656,19 +679,34 @@ def get_duplicate_groups(
             "longitude": inc.longitude,
             "address": inc.address,
             "primary_media_url": inc.primary_media_url,
-            "created_at": inc.created_at,
+            "created_at": inc.created_at.isoformat() if inc.created_at else None,
+            "status": inc.status
+        }
+
+        groups.append({
+            "group_id": inc.duplicate_group_id or f"DUP-GRP-{inc.incident_code}",
+            "incident_id": inc.id,
+            "incident_code": inc.incident_code,
+            "category": inc.category,
+            "title": inc.title,
+            "ward_name": primary_inc["ward_name"],
+            "ward_number": inc.ward_number,
+            "latitude": inc.latitude,
+            "longitude": inc.longitude,
+            "address": inc.address,
+            "primary_media_url": inc.primary_media_url,
+            "created_at": inc.created_at.isoformat() if inc.created_at else None,
             "status": inc.status,
             "total_reports": len(reports),
+            "reports_count": len(reports),
             "duplicate_count": len(duplicate_reports),
+            "duplicates_count": len(duplicate_reports),
             "average_similarity_score": round(avg_score, 3),
-            "primary_report": {
-                "id": primary_report.id,
-                "created_at": primary_report.created_at,
-                "source": primary_report.source,
-                "raw_text": primary_report.raw_text,
-                "media_url": primary_report.media[0].media_url if primary_report.media else inc.primary_media_url
-            },
-            "duplicate_reports": dup_items
+            "avg_duplicate_score": round(avg_score, 3),
+            "primary_incident": primary_inc,
+            "primary_report": prim_item,
+            "duplicate_reports": dup_items,
+            "reports": all_reports
         })
 
     total_reports = db.query(Report).count()

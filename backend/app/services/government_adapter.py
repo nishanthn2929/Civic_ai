@@ -186,7 +186,7 @@ class GovernmentReportingAdapter:
             f"Priority Score: {incident.priority_score}\n"
             f"Timestamp: {incident.created_at.isoformat() if incident.created_at else 'N/A'}\n"
             f"BBMP 24x7 Helpline: 1533\n"
-            f"BBMP Sahaya Portal: https://bbmp.gov.in"
+            f"BBMP Sahaya 2.0 Portal: https://nammabengaluru.org.in/"
         )
         return {
             "incident_id": incident.id,
@@ -194,7 +194,9 @@ class GovernmentReportingAdapter:
             "mode": "CITIZEN_ASSISTED_HANDOFF",
             "formatted_dossier": dossier,
             "bbmp_helpline": "1533",
-            "official_portal_url": "https://bbmp.gov.in",
+            "official_portal_url": "https://nammabengaluru.org.in/",
+            "ipgrs_portal_url": "https://ipgrs.karnataka.gov.in/",
+            "sahaaya_app_url": "https://play.google.com/store/apps/details?id=com.nammabengaluruNew.org",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
 
