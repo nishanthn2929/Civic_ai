@@ -156,8 +156,9 @@ def process_dashcam_frame(
 
     session.frames_processed += 1
 
-    # Effective minimum confidence threshold
-    effective_thresh = settings.DEFAULT_CONFIDENCE_THRESHOLD
+    DRIVE_MODE_DEFAULT_THRESHOLD = 0.65
+    client_thresh = float(frame.confidence) if (frame.confidence and frame.confidence >= 0.15) else None
+    effective_thresh = client_thresh if client_thresh is not None else DRIVE_MODE_DEFAULT_THRESHOLD
 
     # For real camera frames, use the configured detector as the source of
     # truth. The client confidence is only a simulation fallback.
@@ -168,12 +169,13 @@ def process_dashcam_frame(
             detected_bytes = base64.b64decode(encoded)
             cv_result = cv_service.detect_in_image(
                 detected_bytes,
-                confidence_threshold=frame.confidence if (frame.confidence and frame.confidence > 0) else effective_thresh
+                confidence_threshold=effective_thresh
             )
             cv_analysis = cv_result
+            valid_pothole_classes = {"pothole", "road damage", "road crack", "road_crack", "road_damage", "item"}
             pothole_detections = [
                 detection for detection in cv_result.get("detections", [])
-                if detection.get("class_name") in ["Pothole", "Road Damage", "Road Crack"]
+                if (detection.get("class_name") or "").lower() in valid_pothole_classes
             ]
             if not pothole_detections:
                 db.commit()

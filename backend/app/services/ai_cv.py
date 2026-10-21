@@ -16,20 +16,46 @@ class ComputerVisionService:
     def __init__(self):
         self.model = None
         self.model_name = "None"
+        self.face_cascade = None
+        self._init_face_cascade()
         self._init_model()
+
+    def _init_face_cascade(self):
+        """Load OpenCV frontal face and upperbody Haar cascades to reject human false positives."""
+        self.face_cascades = []
+        cascade_names = [
+            "haarcascade_frontalface_alt2.xml",
+            "haarcascade_frontalface_default.xml",
+            "haarcascade_profileface.xml",
+            "haarcascade_upperbody.xml"
+        ]
+        for name in cascade_names:
+            try:
+                p = cv2.data.haarcascades + name
+                casc = cv2.CascadeClassifier(p)
+                if not casc.empty():
+                    self.face_cascades.append(casc)
+            except Exception:
+                pass
 
     def _init_model(self):
         """Initialize the road-defect detector using the best available trained model."""
         try:
             from ultralytics import YOLO, RTDETR
+            data_pothole = Path(settings.DATA_DIR) / "rtdetr_pothole_best.pt"
+            pipeline_pothole = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "rtdetr_pothole_best.pt"
             data_yolo = Path(settings.DATA_DIR) / "yolov8_pothole_best.pt"
             pipeline_yolo = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "yolov8_pothole_best.pt"
             data_multiclass = Path(settings.DATA_DIR) / "civic_multiclass_rtdetr_best.pt"
             pipeline_multiclass = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "civic_multiclass_rtdetr_best.pt"
-            data_pothole = Path(settings.DATA_DIR) / "rtdetr_pothole_best.pt"
-            pipeline_pothole = Path(__file__).resolve().parent.parent.parent.parent / "ml_pipeline" / "weights" / "rtdetr_pothole_best.pt"
 
-            if data_yolo.exists():
+            if data_pothole.exists():
+                self.model = RTDETR(str(data_pothole))
+                self.model_name = f"Custom-Trained RT-DETR ({data_pothole.name})"
+            elif pipeline_pothole.exists():
+                self.model = RTDETR(str(pipeline_pothole))
+                self.model_name = f"Custom-Trained RT-DETR ({pipeline_pothole.name})"
+            elif data_yolo.exists():
                 self.model = YOLO(str(data_yolo))
                 self.model_name = f"Fine-Tuned Road Detector ({data_yolo.name})"
             elif pipeline_yolo.exists():
@@ -107,6 +133,133 @@ class ComputerVisionService:
         phash = self.compute_phash(img)
         is_clear = blur_val >= settings.DEFAULT_BLUR_THRESHOLD
 
+        # 0. Multi-Cascade Human Subject & Skin-Tone Pre-Screening:
+        detected_humans = []
+        has_prominent_human = False
+        if getattr(self, 'face_cascades', None):
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            for casc in self.face_cascades:
+                try:
+                    boxes = casc.detectMultiScale(
+                        gray, scaleFactor=1.12, minNeighbors=3, minSize=(30, 30)
+                    )
+                    if len(boxes) > 0:
+                        for (hx, hy, hw, hh) in boxes:
+                            detected_humans.append((hx, hy, hw, hh))
+                            # Flag if a person / face occupies > 3% of the frame
+                            if (hw * hh) > (w * h * 0.03):
+                                has_prominent_human = True
+                except Exception:
+                    pass
+
+        # Global Human Skin Tone Check (Kovac/Chai standard YCrCb model)
+        ycrcb_full = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+        cr_full = ycrcb_full[:, :, 1]
+        cb_full = ycrcb_full[:, :, 2]
+        full_skin_mask = (cr_full >= 133) & (cr_full <= 173) & (cb_full >= 77) & (cb_full <= 127)
+        frame_skin_ratio = float(np.mean(full_skin_mask))
+
+        # If a human subject is in the camera view (>5% skin or prominent face/upperbody),
+        # suppress road pothole detections completely
+        if has_prominent_human or frame_skin_ratio > 0.05:
+            return {
+                "detected_category": "Other",
+                "confidence": 0.0,
+                "suggested_severity": "LOW",
+                "severity_reason": "LOW: Human subject/face/skin detected in camera frame. Pothole detection suppressed.",
+                "severity_factors": {
+                    "severity": "LOW",
+                    "defect_area_pct": 0.0,
+                    "total_area_pct": 0.0,
+                    "defect_count": 0,
+                    "risk_level": "MINOR",
+                    "hazard_summary": "Human subject detected in camera view",
+                    "recommended_action": "Mount camera facing forward onto road surface"
+                },
+                "blur_score": round(blur_val, 2),
+                "is_clear": is_clear,
+                "phash": phash,
+                "detections": [],
+                "image_dimensions": {"width": w, "height": h}
+            }
+
+        # Convert image to HSV for asphalt/concrete saturation screening
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        def _is_valid_road_defect_box(x1, y1, x2, y2):
+            bw = x2 - x1
+            bh = y2 - y1
+            if bw < 12 or bh < 8:
+                return False
+
+            # Road Region of Interest: center point must not be in top 30% of frame (sky / horizon)
+            center_y = (y1 + y2) / 2.0
+            if center_y < (h * 0.30):
+                return False
+
+            # Bottom-edge cutoff / car hood / border artifact filter:
+            # Rejects boxes clipped or touching the bottom frame boundary (y2 >= 95% of height)
+            if y2 >= (h * 0.95) and (y1 > (h * 0.80) or bh < (h * 0.14)):
+                return False
+
+            # Side border cutoff artifact filter:
+            if (x1 <= 2.0 and x2 < (w * 0.08)) or (x2 >= (w - 2.0) and (x2 - x1) < (w * 0.08)):
+                return False
+
+            # Max Area Filter: reject if area > 35% of total frame area
+            box_area = bw * bh
+            if (box_area / float(w * h)) > 0.35:
+                return False
+
+            # Aspect Ratio Filter: reject tall vertical boxes where width / height < 0.70
+            # Potholes and road cavities are horizontally elongated or rounded ellipses
+            if (bw / max(1.0, bh)) < 0.70:
+                return False
+
+            # Human overlap check: reject if overlapping with any detected face/upper body
+            for (fx, fy, fw, fh) in detected_humans:
+                ix1 = max(x1, float(fx))
+                iy1 = max(y1, float(fy))
+                ix2 = min(x2, float(fx + fw))
+                iy2 = min(y2, float(fy + fh))
+                if ix2 > ix1 and iy2 > iy1:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    if (inter / box_area > 0.08) or (inter / float(fw * fh) > 0.08):
+                        return False
+
+            # Crop box coordinates
+            bx1 = max(0, min(w - 1, int(x1)))
+            by1 = max(0, min(h - 1, int(y1)))
+            bx2 = max(bx1 + 1, min(w, int(x2)))
+            by2 = max(by1 + 1, min(h, int(y2)))
+            crop = img[by1:by2, bx1:bx2]
+            if crop.size == 0:
+                return False
+
+            # YCrCb Skin Tone Check: reject if >10% of pixels in box match human skin
+            crop_ycrcb = ycrcb_full[by1:by2, bx1:bx2]
+            cr = crop_ycrcb[:, :, 1]
+            cb = crop_ycrcb[:, :, 2]
+            box_skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+            if float(np.mean(box_skin)) > 0.10:
+                return False
+
+            # Low-saturation check: real asphalt / concrete road surfaces have low saturation (mean HSV S < 52)
+            # Rejects high-saturation items (pink/red clothing, skin tones, vibrant indoor objects)
+            crop_hsv = hsv_img[by1:by2, bx1:bx2]
+            mean_sat = float(np.mean(crop_hsv[:, :, 1]))
+            if mean_sat >= 52.0:
+                return False
+
+            # Achromatic Road Check: Asphalt is gray/black stone (R ≈ G ≈ B)
+            # Human skin and warm room clothing have high (R - B) differences
+            b_mean = float(np.mean(crop[:, :, 0]))
+            r_mean = float(np.mean(crop[:, :, 2]))
+            if abs(r_mean - b_mean) > 25.0:
+                return False
+
+            return True
+
         detections: List[Dict[str, Any]] = []
         candidate_boxes: List[Dict[str, Any]] = []
 
@@ -127,14 +280,9 @@ class ComputerVisionService:
                             y1 = max(0.0, min(float(h), xyxy[1]))
                             x2 = max(0.0, min(float(w), xyxy[2]))
                             y2 = max(0.0, min(float(h), xyxy[3]))
-                            bw = x2 - x1
-                            bh = y2 - y1
 
-                            # Road ROI constraint: Potholes exist on the road surface
-                            # Exclude boxes entirely in sky / horizon (y1 < h * 0.14)
-                            if y1 < (h * 0.14) and y2 < (h * 0.22):
-                                continue
-                            if bw < 18 or bh < 15 or (bw * bh) > (w * h * 0.75):
+                            # Apply strict road, face, skin, and geometry validations
+                            if not _is_valid_road_defect_box(x1, y1, x2, y2):
                                 continue
 
                             # Map detector classes from the multiclass civic dataset.
@@ -150,6 +298,8 @@ class ComputerVisionService:
                             elif cls_name.lower() in ["streetlight", "street_light", "broken_streetlight"]:
                                 mapped_category = "Broken Streetlight"
 
+                            bw = x2 - x1
+                            bh = y2 - y1
                             candidate_boxes.append({
                                 "class_name": mapped_category,
                                 "confidence": round(conf, 3),
@@ -159,16 +309,15 @@ class ComputerVisionService:
             except Exception as e:
                 print(f"[Inference Error] Model inference warning: {e}")
 
-        # 2. Heuristic cavity & texture fallback if neural detector found no boxes in the road frame
-        if len(candidate_boxes) == 0:
+        # 2. Heuristic cavity & texture fallback ONLY if NO neural model could be loaded at all
+        if self.model is None and len(candidate_boxes) == 0:
             try:
-                hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
                 road_mask = np.zeros((h, w), dtype=np.uint8)
-                road_mask[int(h * 0.14):, :] = 255
+                road_mask[int(h * 0.30):, :] = 255
 
-                puddle_mask = ((hsv[:,:,0] >= 10) & (hsv[:,:,0] <= 36) & 
-                               (hsv[:,:,1] >= 12) & (hsv[:,:,1] <= 65) & 
-                               (hsv[:,:,2] >= 90) & (hsv[:,:,2] <= 195)).astype(np.uint8) * 255
+                puddle_mask = ((hsv_img[:,:,0] >= 10) & (hsv_img[:,:,0] <= 36) & 
+                               (hsv_img[:,:,1] >= 12) & (hsv_img[:,:,1] <= 60) & 
+                               (hsv_img[:,:,2] >= 90) & (hsv_img[:,:,2] <= 195)).astype(np.uint8) * 255
                 puddle_mask = cv2.bitwise_and(puddle_mask, road_mask)
                 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
                 closed = cv2.morphologyEx(puddle_mask, cv2.MORPH_CLOSE, kernel)
@@ -178,14 +327,13 @@ class ComputerVisionService:
                     area = cv2.contourArea(cnt)
                     if area > (w * h * 0.008):
                         x, y, cw, ch = cv2.boundingRect(cnt)
-                        ratio = cw / max(1, ch)
-                        if 0.4 <= ratio <= 3.2 and cw < (w * 0.85) and ch < (h * 0.85):
-                            pad = int(min(cw, ch) * 0.14)
-                            x1 = max(0.0, float(x - pad))
-                            y1 = max(float(h * 0.14), float(y - pad))
-                            x2 = min(float(w), float(x + cw + pad))
-                            y2 = min(float(h), float(y + ch + pad))
-                            calc_conf = min(0.95, max(0.72, 0.75 + (area / (w * h) * 1.5)))
+                        pad = int(min(cw, ch) * 0.14)
+                        x1 = max(0.0, float(x - pad))
+                        y1 = max(float(h * 0.30), float(y - pad))
+                        x2 = min(float(w), float(x + cw + pad))
+                        y2 = min(float(h), float(y + ch + pad))
+                        if _is_valid_road_defect_box(x1, y1, x2, y2):
+                            calc_conf = min(0.95, max(0.78, 0.78 + (area / (w * h) * 1.5)))
                             candidate_boxes.append({
                                 "class_name": "Pothole",
                                 "confidence": round(calc_conf, 3),
@@ -195,48 +343,19 @@ class ComputerVisionService:
             except Exception as e:
                 print(f"[Cavity Detector Notice] {e}")
 
-            # 3. CLAHE Contour Texture Fallback if still empty and model is None
-            if len(candidate_boxes) == 0:
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                roi_y_start = int(h * 0.20)
-                road_roi = gray[roi_y_start:h, :]
-                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-                enhanced_roi = clahe.apply(road_roi)
-                blurred = cv2.GaussianBlur(enhanced_roi, (5, 5), 0)
-                thresh_dark = cv2.adaptiveThreshold(
-                    blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
-                )
-                edges = cv2.Canny(blurred, 25, 80)
-                combined_mask = cv2.bitwise_or(thresh_dark, edges)
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                closed = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
-                contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                min_area = max(180, int(w * h * 0.002))
-                max_area = int(w * h * 0.50)
-                for cnt in contours:
-                    area = cv2.contourArea(cnt)
-                    if min_area < area < max_area:
-                        x, y, cw, ch = cv2.boundingRect(cnt)
-                        aspect_ratio = float(cw) / max(ch, 1)
-                        if 0.30 < aspect_ratio < 4.5:
-                            real_y = y + roi_y_start
-                            area_ratio = area / (w * h)
-                            calc_conf = min(0.95, max(0.65, 0.70 + (area_ratio * 1.5)))
-                            candidate_boxes.append({
-                                "class_name": "Pothole",
-                                "confidence": round(calc_conf, 3),
-                                "bbox": [float(x), float(real_y), float(x + cw), float(real_y + ch)],
-                                "area": area
-                            })
-
-        # 4. Sort and apply NMS deduplication to guarantee tight, non-overlapping bounding boxes
+        # 4. Multi-scale NMS & Enveloping: merge duplicate sub-boxes on the same road defect
         candidate_boxes.sort(key=lambda item: item["confidence"], reverse=True)
-        final_kept = []
+        final_kept: List[Dict[str, Any]] = []
+
         for cand in candidate_boxes:
             b1 = cand["bbox"]
-            overlap = False
-            for kept in final_kept:
+            a1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
+            matched_idx = -1
+
+            for idx, kept in enumerate(final_kept):
                 b2 = kept["bbox"]
+                a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
+
                 ix1 = max(b1[0], b2[0])
                 iy1 = max(b1[1], b2[1])
                 ix2 = min(b1[2], b2[2])
@@ -244,14 +363,37 @@ class ComputerVisionService:
                 iw = max(0.0, ix2 - ix1)
                 ih = max(0.0, iy2 - iy1)
                 inter = iw * ih
-                union = (b1[2]-b1[0])*(b1[3]-b1[1]) + (b2[2]-b2[0])*(b2[3]-b2[1]) - inter
-                iou = inter / max(1e-6, union)
-                if iou > 0.25:
-                    overlap = True
-                    break
-            if not overlap:
+
+                if inter > 0:
+                    union = a1 + a2 - inter
+                    iou = inter / max(1e-6, union)
+                    iom = inter / min(a1, a2)  # Intersection over Minimum (nested containment)
+
+                    # If IoU > 0.20 or containment iom > 0.30: detects the same physical defect
+                    if iou > 0.20 or iom > 0.30:
+                        matched_idx = idx
+                        break
+
+            if matched_idx >= 0:
+                # Merge into existing detection to form one comprehensive, clean envelope
+                existing = final_kept[matched_idx]
+                eb = existing["bbox"]
+                merged_bbox = [
+                    round(min(eb[0], b1[0]), 1),
+                    round(min(eb[1], b1[1]), 1),
+                    round(max(eb[2], b1[2]), 1),
+                    round(max(eb[3], b1[3]), 1)
+                ]
+                merged_w = merged_bbox[2] - merged_bbox[0]
+                merged_h = merged_bbox[3] - merged_bbox[1]
+                # Keep merged box if within sensible defect dimensions (<= 35% frame area)
+                if (merged_w * merged_h) <= (w * h * 0.35):
+                    existing["bbox"] = merged_bbox
+                    existing["confidence"] = max(existing["confidence"], cand["confidence"])
+                    existing["area"] = merged_w * merged_h
+            else:
                 final_kept.append(cand)
-                if len(final_kept) >= 6:
+                if len(final_kept) >= 3:  # Keep display clean: max 3 distinct road defects per frame
                     break
 
         for det in final_kept:

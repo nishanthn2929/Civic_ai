@@ -11,7 +11,7 @@ A production-quality, full-stack civic issue reporting and incident management p
 - **Report:** Individual citizen or dashcam observation.
 - **Civic Incident:** The canonical physical civic defect on the road. Repeated frames or multiple citizen reports for the same pothole attach to the same incident, boosting confidence and dispatch priority without duplicating municipal tickets.
 
-### 2. AI Dashcam Drive Mode (Reference: Pothole Reporter)
+### 2. AI Drive Mode (Reference: Pothole Reporter)
 - Zero-touch, non-distracting driver HUD (`DRIVE MODE ACTIVE`, `AI Monitoring Road`, `Issues Detected: N`).
 - Audio chime synthesized via Web Audio API for hands-free driver notification.
 - **Temporal Filtering:** Consecutive video frames (within 2.5s and 15m) are merged into **one detection event** with the sharpest evidence frame selected.

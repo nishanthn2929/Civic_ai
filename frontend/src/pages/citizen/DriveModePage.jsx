@@ -222,7 +222,7 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
   const boxTimeoutRef = useRef(null);
 
   // Configuration & Settings (Section 7)
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.35);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0.78);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [voiceAlertsEnabled, setVoiceAlertsEnabled] = useState(true);
 
@@ -540,7 +540,7 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
     if (uploadedVideoUrl) URL.revokeObjectURL(uploadedVideoUrl);
     setUploadedVideo(file);
     setUploadedVideoUrl(URL.createObjectURL(file));
-    setConfidenceThreshold(0.30);
+    setConfidenceThreshold(0.78);
     setStartupError(null);
     setSimulationMode(false);
   };
@@ -723,7 +723,7 @@ Response message: ${detail}`);
         if (isDrivingRef.current) {
           scheduleNextFrame(activeSessionId);
         }
-      }, 700);
+      }, 400); // 400ms interval (2.5 fps) ensures high responsiveness at road driving speeds
     };
 
     scheduleNextFrame(session.id);
@@ -792,8 +792,8 @@ Response message: ${detail}`);
   // Capture video frame and process via AI Pipeline (Requirement 6, 7, 8)
   const captureAndProcessFrame = async (activeSessionId) => {
     if (!isDrivingRef.current) return;
-    // For live drives, pause if a candidate is pending review. For uploaded videos, keep continuous real-time scanning.
-    if (frameBusyRef.current || (!uploadedVideo && pendingDetectionRef.current)) return;
+    // Non-blocking frame capture: continue scanning frames smoothly without stalling when candidates are flagged
+    if (frameBusyRef.current) return;
     frameBusyRef.current = true;
 
     const currentGps = gpsLocationRef.current;
@@ -883,8 +883,10 @@ Response message: ${detail}`);
       const res = await citizenService.processFrame(payload);
 
       // 1. Process and render Solid Red Rectangular Bounding Boxes on Video
-      if (res.detections && res.detections.length > 0) {
-        const formattedBoxes = formatPotholeBoundingBoxes(res.detections);
+      const minConfidence = Math.max(0.65, confidenceThreshold || 0.65);
+      const filteredDetections = (res.detections || []).filter(d => (d.confidence || 0) >= minConfidence);
+      if (filteredDetections.length > 0) {
+        const formattedBoxes = formatPotholeBoundingBoxes(filteredDetections);
         setActiveBoxes(formattedBoxes);
 
         // Record timestamp marker on video scrubber
@@ -903,7 +905,7 @@ Response message: ${detail}`);
             setActiveBoxes([]);
           }
         }, 900);
-      } else if (res.status === 'IGNORED_NO_POTHOLE') {
+      } else {
         setActiveBoxes([]);
       }
 
