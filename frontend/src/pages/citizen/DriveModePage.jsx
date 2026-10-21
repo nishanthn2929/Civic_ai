@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Car, Play, Pause, Square, AlertTriangle, ShieldCheck, CheckCircle2, Volume2, VolumeX,
   Camera, Upload, Eye, MapPin, Compass, Gauge, Layers, Landmark, Award, Wifi, WifiOff,
-  RotateCcw, Check, LogIn, User, ExternalLink, Navigation, Sliders, AlertCircle, RefreshCw
+  RotateCcw, Check, LogIn, User, ExternalLink, Navigation, Sliders, AlertCircle, RefreshCw,
+  Search, X, Crosshair, LocateFixed
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { citizenService, authService, publicService } from '../../services/api';
 import {
@@ -45,8 +46,8 @@ const potholeIcon = L.divIcon({
   popupAnchor: [0, -14]
 });
 
-// Helper map component to follow vehicle smoothly without animation queue thrashing
-function MapFollower({ center }) {
+// Helper map component to follow vehicle smoothly and capture map clicks to set exact location
+function MapController({ center, onLocationSelect }) {
   const map = useMap();
   const lastPosRef = useRef(null);
 
@@ -64,6 +65,14 @@ function MapFollower({ center }) {
       map.setView([lat, lon], map.getZoom(), { animate: false });
     }
   }, [center, map]);
+
+  useMapEvents({
+    click(e) {
+      if (onLocationSelect) {
+        onLocationSelect(e.latlng.lat, e.latlng.lng);
+      }
+    }
+  });
 
   return null;
 }
@@ -87,13 +96,14 @@ function calculateHaversineKm(lat1, lon1, lat2, lon2) {
 // Popular Bengaluru road corridors for realistic localized testing
 const BENGALURU_CORRIDORS = [
   { id: 'live', name: 'My Live GPS Location', lat: null, lon: null, desc: 'Auto-detected device GPS coordinates' },
-  { id: 'mg_road', name: 'MG Road / Brigade Road', lat: 12.9756, lon: 77.6095, desc: 'Ward #111 Shantalanagar • Central' },
-  { id: 'indiranagar', name: 'Indiranagar 100ft Road', lat: 12.9719, lon: 77.6412, desc: 'Ward #112 Domlur / Indiranagar • East' },
-  { id: 'outer_ring', name: 'Outer Ring Road / Bellandur', lat: 12.9260, lon: 77.6762, desc: 'Ward #150 Bellandur • Mahadevapura' },
-  { id: 'whitefield', name: 'Whitefield ITPL Main Road', lat: 12.9856, lon: 77.7289, desc: 'Ward #84 Whitefield • Mahadevapura' },
-  { id: 'hebbal', name: 'Hebbal Flyover / Bellary Road', lat: 13.0358, lon: 77.5970, desc: 'Ward #7 Byatarayanapura • North' },
-  { id: 'jayanagar', name: 'Jayanagar 4th Block', lat: 12.9298, lon: 77.5838, desc: 'Ward #153 Jayanagar • South' },
   { id: 'koramangala', name: 'Koramangala 80ft Road', lat: 12.9352, lon: 77.6245, desc: 'Ward #151 Koramangala • South' },
+  { id: 'indiranagar', name: 'Indiranagar 100ft Road', lat: 12.9719, lon: 77.6412, desc: 'Ward #112 Domlur / Indiranagar • East' },
+  { id: 'hsr_layout', name: 'HSR Layout 27th Main', lat: 12.9116, lon: 77.6389, desc: 'Ward #174 HSR Layout • Bommanahalli' },
+  { id: 'whitefield', name: 'Whitefield ITPL Main Road', lat: 12.9856, lon: 77.7289, desc: 'Ward #84 Whitefield • Mahadevapura' },
+  { id: 'mg_road', name: 'MG Road / Brigade Road', lat: 12.9756, lon: 77.6095, desc: 'Ward #111 Shantalanagar • Central' },
+  { id: 'outer_ring', name: 'Outer Ring Road / Bellandur', lat: 12.9260, lon: 77.6762, desc: 'Ward #150 Bellandur • Mahadevapura' },
+  { id: 'jayanagar', name: 'Jayanagar 4th Block', lat: 12.9298, lon: 77.5838, desc: 'Ward #153 Jayanagar • South' },
+  { id: 'hebbal', name: 'Hebbal Flyover / Bellary Road', lat: 13.0358, lon: 77.5970, desc: 'Ward #7 Byatarayanapura • North' },
 ];
 
 // Political Party Badge styling
@@ -114,9 +124,9 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
 
   // Live Vehicle Telemetry (Section 4 & 5)
   const [gpsLocation, setGpsLocation] = useState({
-    latitude: 12.9716, // Bengaluru Central default until browser GPS fix
-    longitude: 77.5946,
-    accuracy: 15,
+    latitude: 12.9352, // Default to Koramangala Ward 151
+    longitude: 77.6245,
+    accuracy: 5,
     speed: 32, // km/h
     heading: 90,
     timestamp: Date.now()
@@ -125,15 +135,110 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
   const [gpsConnected, setGpsConnected] = useState(false);
   const [hasRealGps, setHasRealGps] = useState(false);
   const [currentWardInfo, setCurrentWardInfo] = useState(null);
-  const [selectedCorridor, setSelectedCorridor] = useState('live');
+  const [selectedCorridor, setSelectedCorridor] = useState('koramangala');
   const [distanceTraveledKm, setDistanceTraveledKm] = useState(0.0);
   const distanceTraveledKmRef = useRef(0.0);
   const prevCoordsRef = useRef(null);
-  const baseOriginCoordsRef = useRef({ lat: 12.9716, lon: 77.5946 });
+  const baseOriginCoordsRef = useRef({ lat: 12.9352, lon: 77.6245 });
+
+  // Exact Location Overrides & Search State
+  const [isManualLocationLocked, setIsManualLocationLocked] = useState(false);
+  const isManualLocationLockedRef = useRef(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [locationToast, setLocationToast] = useState(null);
+  const frameOffsetRef = useRef(0);
+  const framesProcessedRef = useRef(0);
 
   const [simulationMode, setSimulationMode] = useState(false);
   const [uploadedVideo, setUploadedVideo] = useState(null);
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
+
+  // Handler to set exact coordinates via click on map, drag marker, search or corridor chip
+  const handleSetExactLocation = async (lat, lon, label = null) => {
+    const pLat = parseFloat(lat);
+    const pLon = parseFloat(lon);
+    if (isNaN(pLat) || isNaN(pLon)) return;
+
+    isManualLocationLockedRef.current = true;
+    setIsManualLocationLocked(true);
+    setSelectedCorridor('custom');
+    frameOffsetRef.current = framesProcessedRef.current;
+    baseOriginCoordsRef.current = { lat: pLat, lon: pLon };
+
+    const newLoc = {
+      ...gpsLocationRef.current,
+      latitude: pLat,
+      longitude: pLon,
+      accuracy: 5.0,
+      timestamp: Date.now()
+    };
+    gpsLocationRef.current = newLoc;
+    setGpsLocation(newLoc);
+    setGpsAccuracyStatus('HIGH');
+    setGpsConnected(true);
+    setSearchResults([]);
+    setSearchQuery('');
+
+    try {
+      const geo = await citizenService.reverseGeocode(pLat, pLon);
+      if (geo) {
+        setCurrentWardInfo(geo);
+        setLocationToast(`Location set: ${geo.exact_road || geo.ward_name || label || 'Selected Point'}`);
+        setTimeout(() => setLocationToast(null), 3500);
+      }
+    } catch (err) {
+      console.warn('[Drive Mode] Reverse geocode error:', err);
+    }
+  };
+
+  const handleSearchLocation = async (q) => {
+    setSearchQuery(q);
+    if (!q || q.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const results = await citizenService.searchLocation(q.trim());
+      setSearchResults(results || []);
+    } catch (err) {
+      console.warn('[Search Location Error]', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleResetToDeviceGps = () => {
+    isManualLocationLockedRef.current = false;
+    setIsManualLocationLocked(false);
+    setSelectedCorridor('live');
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          const acc = Math.round(pos.coords.accuracy || 10);
+          const loc = { latitude: lat, longitude: lon, accuracy: acc, speed: 0, heading: 90, timestamp: Date.now() };
+          gpsLocationRef.current = loc;
+          setGpsLocation(loc);
+          baseOriginCoordsRef.current = { lat, lon };
+          frameOffsetRef.current = framesProcessedRef.current;
+          try {
+            const geo = await citizenService.reverseGeocode(lat, lon);
+            if (geo) {
+              setCurrentWardInfo(geo);
+              setLocationToast(`Device GPS: ${geo.ward_name || 'Current Location'}`);
+              setTimeout(() => setLocationToast(null), 3500);
+            }
+          } catch (_) {}
+        },
+        (err) => console.warn('Device GPS error:', err),
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
+  };
 
   // Query real browser GPS and ward details immediately on mount
   useEffect(() => {
@@ -143,28 +248,36 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
           const lat = pos.coords.latitude;
           const lon = pos.coords.longitude;
           const acc = Math.round(pos.coords.accuracy || 10);
-          const realLoc = {
-            latitude: lat,
-            longitude: lon,
-            accuracy: acc,
-            speed: pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0,
-            heading: Math.round(pos.coords.heading || 90),
-            timestamp: pos.timestamp || Date.now()
-          };
-          gpsLocationRef.current = realLoc;
-          setGpsLocation(realLoc);
-          setHasRealGps(true);
-          setGpsConnected(true);
-          baseOriginCoordsRef.current = { lat, lon };
 
           try {
             const geo = await citizenService.reverseGeocode(lat, lon);
             if (geo) {
-              setCurrentWardInfo(geo);
+              // If device GPS is genuine Bengaluru point, use it; if outside BBMP (like Nelamangala on desktop IP),
+              // keep Koramangala as active corridor so user has authentic BBMP intelligence
+              if (geo.is_within_bengaluru) {
+                const realLoc = {
+                  latitude: lat,
+                  longitude: lon,
+                  accuracy: acc,
+                  speed: pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0,
+                  heading: Math.round(pos.coords.heading || 90),
+                  timestamp: pos.timestamp || Date.now()
+                };
+                gpsLocationRef.current = realLoc;
+                setGpsLocation(realLoc);
+                setHasRealGps(true);
+                baseOriginCoordsRef.current = { lat, lon };
+                setCurrentWardInfo(geo);
+                setSelectedCorridor('live');
+              } else {
+                console.info('[Drive Mode] Device IP resolved outside BBMP (' + (geo.ward_name || 'Nelamangala') + '). Defaulting corridor to Koramangala.');
+                setCurrentWardInfo(geo);
+              }
             }
           } catch (err) {
-            console.warn('[Drive Mode] Reverse geocode error:', err);
+            console.warn('[Drive Mode] Initial reverse geocode error:', err);
           }
+          setGpsConnected(true);
         },
         (err) => {
           console.warn('[Drive Mode] Initial geolocation check warning:', err.message);
@@ -180,34 +293,9 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
     if (!c) return;
 
     if (corridorId === 'live') {
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            const acc = Math.round(pos.coords.accuracy || 10);
-            const loc = { latitude: lat, longitude: lon, accuracy: acc, speed: 0, heading: 90, timestamp: Date.now() };
-            gpsLocationRef.current = loc;
-            setGpsLocation(loc);
-            setHasRealGps(true);
-            baseOriginCoordsRef.current = { lat, lon };
-            try {
-              const geo = await citizenService.reverseGeocode(lat, lon);
-              if (geo) setCurrentWardInfo(geo);
-            } catch (_) {}
-          },
-          () => alert('Please enable location access in your browser settings to use your live device coordinates.')
-        );
-      }
+      handleResetToDeviceGps();
     } else if (c.lat && c.lon) {
-      const loc = { latitude: c.lat, longitude: c.lon, accuracy: 8, speed: 32, heading: 90, timestamp: Date.now() };
-      gpsLocationRef.current = loc;
-      setGpsLocation(loc);
-      baseOriginCoordsRef.current = { lat: c.lat, lon: c.lon };
-      try {
-        const geo = await citizenService.reverseGeocode(c.lat, c.lon);
-        if (geo) setCurrentWardInfo(geo);
-      } catch (_) {}
+      handleSetExactLocation(c.lat, c.lon, c.name);
     }
   };
 
@@ -444,6 +532,9 @@ export default function DriveModePage({ currentUser, onOpenAuth }) {
 
     geoWatchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        // If user manually set an exact location on the map, do not let browser Wi-Fi/IP GPS overwrite it
+        if (isManualLocationLockedRef.current) return;
+
         const coords = pos.coords;
         const acc = Math.round(coords.accuracy || 10);
         const spd = coords.speed != null ? Math.round(coords.speed * 3.6) : (simulationMode ? 34 : 0);
@@ -801,20 +892,21 @@ Response message: ${detail}`);
     let currentLat = currentGps.latitude;
     let currentLon = currentGps.longitude;
 
-    if (hasRealGps && !simulationMode && !uploadedVideo) {
+    if (hasRealGps && !simulationMode && !uploadedVideo && !isManualLocationLockedRef.current) {
       // Use real GPS coordinates from device
       currentLat = currentGps.latitude;
       currentLon = currentGps.longitude;
       currentAccuracy = Math.min(currentAccuracy, 15.0);
     } else {
-      // Advance vehicle forward along road based on chosen origin corridor or real GPS
+      // Advance vehicle forward along road based on chosen origin corridor or manual pinned location
       const base = baseOriginCoordsRef.current || { lat: currentLat, lon: currentLon };
       const headingRad = ((currentGps.heading || 85) * Math.PI) / 180;
-      // Step forward ~6-8 meters per tick (0.00006 degrees)
-      const stepDeg = 0.00006 * (framesProcessed + 1);
+      // Step forward ~6-8 meters per tick from chosen origin
+      const ticks = Math.max(0, framesProcessed - frameOffsetRef.current);
+      const stepDeg = 0.00006 * (ticks + 1);
       currentLat = base.lat + Math.cos(headingRad) * stepDeg;
       currentLon = base.lon + Math.sin(headingRad) * stepDeg;
-      currentAccuracy = 8.0;
+      currentAccuracy = 5.0;
 
       const simLoc = {
         ...currentGps,
@@ -1568,50 +1660,184 @@ Response message: ${detail}`);
             </div>
 
             {/* Right: Live Leaflet Map (Section 20) */}
-            <div className="relative min-h-[300px] sm:min-h-[360px] bg-slate-950 rounded-2xl overflow-hidden border border-white/[0.12] shadow-inner">
-              <MapContainer
-                center={[gpsLocation.latitude, gpsLocation.longitude]}
-                zoom={14}
-                scrollWheelZoom={false}
-                className="w-full h-full z-0"
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <MapFollower center={[gpsLocation.latitude, gpsLocation.longitude]} />
+            <div className="relative min-h-[360px] sm:min-h-[420px] bg-slate-950 rounded-2xl overflow-hidden border border-white/[0.12] shadow-inner flex flex-col">
+              {/* Location Search & Quick Ward Chips Toolbar */}
+              <div className="bg-slate-900/95 border-b border-white/[0.08] p-2 space-y-1.5 z-20">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search exact road or ward in Bengaluru..."
+                      value={searchQuery}
+                      onChange={(e) => handleSearchLocation(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/[0.12] rounded-lg pl-8 pr-7 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/60"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchQuery(''); setSearchResults([]); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {isManualLocationLocked ? (
+                    <button
+                      type="button"
+                      onClick={handleResetToDeviceGps}
+                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                      title="Reset to device live GPS"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset GPS</span>
+                    </button>
+                  ) : (
+                    <div className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-[10px] font-mono shrink-0 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>Device GPS</span>
+                    </div>
+                  )}
+                </div>
 
-                {/* Ward Polygons overlay */}
-                {wardGeoJsonLayer}
+                {/* Floating Search Results Dropdown */}
+                {searchResults.length > 0 && (
+                  <div className="absolute left-2 right-2 top-12 z-50 bg-slate-900 border border-white/[0.15] rounded-xl shadow-2xl max-h-48 overflow-y-auto divide-y divide-white/[0.05]">
+                    {searchResults.map((res, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleSetExactLocation(res.latitude, res.longitude, res.name)}
+                        className="w-full text-left p-2 hover:bg-white/[0.06] transition-colors flex items-center justify-between gap-2"
+                      >
+                        <div className="truncate">
+                          <span className="text-xs text-white font-medium block truncate">{res.name}</span>
+                          <span className="text-[10px] text-slate-400 block truncate">{res.ward_name ? `Ward #${res.ward_number} ${res.ward_name}` : res.zone_name || 'Bengaluru'}</span>
+                        </div>
+                        <span className="text-[9px] text-amber-400 font-mono shrink-0">SELECT</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                {/* Live Vehicle Marker */}
-                <Marker
-                  position={[gpsLocation.latitude, gpsLocation.longitude]}
-                  icon={vehicleIcon}
-                />
+                {/* Quick Corridor Selection Chips */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar text-[10px] pt-0.5">
+                  <span className="text-slate-500 shrink-0 font-medium">Quick Wards:</span>
+                  {BENGALURU_CORRIDORS.filter(c => c.lat && c.lon).map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleSetExactLocation(c.lat, c.lon, c.name)}
+                      className={`px-2 py-0.5 rounded-md border shrink-0 transition-all ${
+                        Math.abs(gpsLocation.latitude - c.lat) < 0.005 && Math.abs(gpsLocation.longitude - c.lon) < 0.005
+                          ? 'bg-amber-400/20 text-amber-300 border-amber-400/50 font-bold'
+                          : 'bg-slate-950/60 text-slate-300 border-white/[0.08] hover:bg-white/[0.05]'
+                      }`}
+                    >
+                      {c.name.split(' ')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-                {/* Detected Pothole Pins */}
-                {detectedPotholes.map(p => (
+              {/* Map Canvas with Click and Drag Support */}
+              <div className="relative flex-1 min-h-[260px]">
+                <MapContainer
+                  center={[gpsLocation.latitude, gpsLocation.longitude]}
+                  zoom={15}
+                  scrollWheelZoom={true}
+                  className="w-full h-full z-0"
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <MapController
+                    center={[gpsLocation.latitude, gpsLocation.longitude]}
+                    onLocationSelect={(lat, lon) => handleSetExactLocation(lat, lon)}
+                  />
+
+                  {/* Ward Polygons overlay */}
+                  {wardGeoJsonLayer}
+
+                  {/* Live Draggable Vehicle Marker */}
                   <Marker
-                    key={p.id}
-                    position={[p.latitude, p.longitude]}
-                    icon={potholeIcon}
+                    position={[gpsLocation.latitude, gpsLocation.longitude]}
+                    icon={vehicleIcon}
+                    draggable={true}
+                    eventHandlers={{
+                      dragend: (e) => {
+                        const pos = e.target.getLatLng();
+                        handleSetExactLocation(pos.lat, pos.lng);
+                      }
+                    }}
                   >
                     <Popup className="custom-leaflet-popup">
-                      <div className="p-1 text-xs text-slate-900 min-w-[180px]">
-                        <div className="font-bold text-red-600 mb-0.5">POTHOLE DETECTED</div>
-                        <div><strong>Ward:</strong> #{p.ward_number} {p.ward_name}</div>
-                        <div><strong>MLA:</strong> {p.mla_name}</div>
-                        <div><strong>MP:</strong> {p.mp_name}</div>
-                        <div className="text-[10px] text-slate-500 mt-1">Status: {p.report_status}</div>
+                      <div className="p-1 text-xs text-slate-900">
+                        <div className="font-bold text-amber-600">VEHICLE LOCATION</div>
+                        <div><strong>Ward:</strong> {currentWardInfo?.ward_name || 'Resolving...'}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Drag marker or click map to move vehicle</div>
                       </div>
                     </Popup>
                   </Marker>
-                ))}
-              </MapContainer>
 
-              <div className="absolute bottom-3 left-3 z-[400] bg-black/80 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] text-slate-300 border border-white/[0.1] font-mono">
-                GPS: {gpsLocation.latitude.toFixed(5)}, {gpsLocation.longitude.toFixed(5)}
+                  {/* Detected Pothole Pins */}
+                  {detectedPotholes.map(p => (
+                    <Marker
+                      key={p.id}
+                      position={[p.latitude, p.longitude]}
+                      icon={potholeIcon}
+                    >
+                      <Popup className="custom-leaflet-popup">
+                        <div className="p-1 text-xs text-slate-900 min-w-[180px]">
+                          <div className="font-bold text-red-600 mb-0.5">POTHOLE DETECTED</div>
+                          <div><strong>Ward:</strong> #{p.ward_number} {p.ward_name}</div>
+                          <div><strong>MLA:</strong> {p.mla_name}</div>
+                          <div><strong>MP:</strong> {p.mp_name}</div>
+                          <div className="text-[10px] text-slate-500 mt-1">Status: {p.report_status}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+
+                {/* Location Toast Notification */}
+                {locationToast && (
+                  <div className="absolute top-3 left-3 right-3 z-[400] bg-emerald-950/95 border border-emerald-500/60 p-2 rounded-xl text-emerald-300 text-xs shadow-lg flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-medium truncate">{locationToast}</span>
+                  </div>
+                )}
+
+                {/* Outside BBMP / Inaccurate IP Warning */}
+                {!currentWardInfo?.is_within_bengaluru && !isManualLocationLocked && (
+                  <div className="absolute top-3 left-3 right-3 z-[400] bg-rose-950/95 border border-rose-500/60 p-2 rounded-xl text-rose-200 text-xs shadow-lg flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 truncate">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span className="truncate">Desktop Wi-Fi located in Nelamangala. Click map or select a ward above to set exact road.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Bottom Overlay Info Banner */}
+                <div className="absolute bottom-3 left-3 right-3 z-[400] flex items-center justify-between gap-2 pointer-events-none">
+                  <div className="bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] text-slate-200 border border-white/[0.12] font-mono shadow flex items-center gap-2 pointer-events-auto">
+                    <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span className="font-bold text-white truncate max-w-[180px]">
+                      {currentWardInfo?.exact_road || currentWardInfo?.ward_name || 'Nelamangala'}
+                    </span>
+                    <span className="text-slate-400">
+                      ({gpsLocation.latitude.toFixed(5)}, {gpsLocation.longitude.toFixed(5)})
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isManualLocationLocked ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                      {isManualLocationLocked ? 'PINNED' : 'DEVICE GPS'}
+                    </span>
+                  </div>
+                  <div className="bg-black/85 backdrop-blur-md px-2.5 py-1.5 rounded-xl text-[10px] text-slate-300 border border-white/[0.12] pointer-events-auto">
+                    Click map to move
+                  </div>
+                </div>
               </div>
             </div>
           </div>
